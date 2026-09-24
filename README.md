@@ -29,6 +29,8 @@ The scripts read the AWS profile and region from environment variables. Create a
 ```dotenv
 AWS_PROFILE=your-profile
 AWS_REGION=us-east-1
+# Optional: defaults to openai.gpt-5.6-luna
+BEDROCK_MODEL_ID=openai.gpt-5.6-luna
 ```
 
 Alternatively, export them in your shell:
@@ -61,6 +63,12 @@ To see the response stream token by token instead, run `openai-agent-streaming.p
 
 ```bash
 uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-streaming.py
+```
+
+To see tool calling, run `openai-agent-tools.py`. A "Finance Assistant" agent compares buying a car with a loan against saving up for it. It calls local Python tools (a loan payment calculator and a savings goal calculator) instead of doing the math itself, and prints each tool call and result before its answer:
+
+```bash
+uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-tools.py
 ```
 
 ## Adding dependencies

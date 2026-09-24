@@ -22,5 +22,5 @@ There is no test suite, linter, or build step configured.
 - Uses the OpenAI Agents SDK (`agents` package) against Amazon Bedrock rather than the OpenAI API, via `AsyncOpenAI(provider=bedrock(region=...))` from `openai.providers`.
 - That client is registered globally with `set_default_openai_client(...)`, so `Agent(...)` / `Runner.run(...)` route to Bedrock.
 - Tracing is turned off with `set_tracing_disabled(True)` because there is no OpenAI tracing endpoint to export to.
-- Model IDs are Bedrock IDs (e.g. `openai.gpt-5.6-luna`).
+- Model IDs are Bedrock IDs, read from `BEDROCK_MODEL_ID` (defaults to `openai.gpt-5.6-luna`).
 - AWS credentials and region come from the `AWS_PROFILE` and `AWS_REGION` environment variables, which must be set before running (for example with `uv run --env-file .env ...`).
