@@ -55,7 +55,13 @@ export UV_ENV_FILE=.env
 uv run 11-openai-agents-sdk-bedrock/openai-agent.py
 ```
 
-The script prints the active AWS profile and region, then sends a prompt to the agent and prints the response.
+The script prints the active AWS profile and region, then sends a prompt to the agent and prints the response, followed by the full run result (items, raw responses, usage) pretty-printed with [rich](https://github.com/Textualize/rich).
+
+To see the response stream token by token instead, run `openai-agent-streaming.py`:
+
+```bash
+uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-streaming.py
+```
 
 ## Adding dependencies
 

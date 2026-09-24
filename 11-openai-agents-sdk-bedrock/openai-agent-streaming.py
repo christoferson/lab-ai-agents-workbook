@@ -1,11 +1,10 @@
 import asyncio
 import os
 from openai import AsyncOpenAI
-from openai.providers import bedrock  
+from openai.providers import bedrock
+from openai.types.responses import ResponseTextDeltaEvent
 # Import the explicit tracing control from the agents SDK
 from agents import Agent, Runner, set_default_openai_client, set_tracing_disabled
-# Import rich print for beautiful terminal formatting
-from rich import print as rprint
 
 
 async def main():
@@ -16,7 +15,7 @@ async def main():
     # 2. Debug Verification: Print environmental variables loaded by uv
     profile = os.environ.get("AWS_PROFILE", "Not Found")
     region = os.environ.get("AWS_REGION", "Not Found")
-    
+
     print("--- Environment Status ---")
     print(f"Active AWS Profile: {profile}")
     print(f"Active AWS Region:  {region}")
@@ -39,21 +38,16 @@ async def main():
         model="openai.gpt-5.6-luna"
     )
 
-    # 6. Run the agentic loop asynchronously
-    print("Sending prompt to GPT-5.6 Luna via Amazon Bedrock...")
-    result = await Runner.run(agent, "In 3 sentences, what is an AI agent and how does it differ from a chatbot?")
+    # 6. Run the agentic loop in streaming mode
+    print("Streaming response from GPT-5.6 Luna via Amazon Bedrock...\n")
+    result = Runner.run_streamed(agent, input="List the 5 core building blocks of an AI agent, one line each.")
 
-    # Output the final result string
-    print("\n--- Agent Response ---")
-    print(result.final_output)
+    # Print each text delta as it arrives
+    async for event in result.stream_events():
+        if event.type == "raw_response_event" and isinstance(event.data, ResponseTextDeltaEvent):
+            print(event.data.delta, end="", flush=True)
 
-    # --- Pretty Print Section ---
-    print("\n================== DETAILED STEP RUN TRACE ==================")
-    
-    # RunResult is a dataclass, so rich renders its fields as a colorful, indented tree
-    rprint(result) 
-    
-    print("=============================================================")
+    print()
 
 if __name__ == "__main__":
     asyncio.run(main())
