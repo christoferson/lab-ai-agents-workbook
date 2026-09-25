@@ -71,6 +71,12 @@ To see tool calling, run `openai-agent-tools.py`. A "Finance Assistant" agent co
 uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-tools.py
 ```
 
+To see conversation history, run `openai-agent-conversation.py`. You tell a travel planner about a relaxed, nature-focused trip to Tokyo, then ask "What should I do on my first morning?" twice: once as a fresh run, which has to ask where you're going, and once with the previous turn passed back via `to_input_list()`, which gives a tailored suggestion:
+
+```bash
+uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-conversation.py
+```
+
 ## Adding dependencies
 
 ```bash
