@@ -86,6 +86,12 @@ To have the SDK manage history for you, run `openai-agent-session.py`. It passes
 uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-session.py
 ```
 
+To see a multi-agent workflow orchestrated by code, run `openai-agent-workflow.py`. Three planner agents (nature, culture, slow travel) draft a Tokyo day plan in parallel with `asyncio.gather`, an editor agent picks the best one, and a publisher agent saves it to `11-openai-agents-sdk-bedrock/itineraries/` (git-ignored) using a `save_itinerary` tool:
+
+```bash
+uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-workflow.py
+```
+
 ### Claude Agent SDK
 
 `claude-agent.py` asks a Claude model on Bedrock a single question and prints the answer plus a run summary (turns, duration, cost). The `claude-agent-sdk` package bundles the Claude Code CLI and runs it in the background, so there's nothing else to install. The script sets `CLAUDE_CODE_USE_BEDROCK=1` so the CLI uses your AWS credentials instead of an Anthropic API key:
