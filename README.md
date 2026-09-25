@@ -77,6 +77,12 @@ To see conversation history, run `openai-agent-conversation.py`. You tell a trav
 uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-conversation.py
 ```
 
+To have the SDK manage history for you, run `openai-agent-session.py`. It passes a `SQLiteSession` to `Runner.run(..., session=session)`, which loads and saves each turn automatically. The history is stored in `sessions.db` next to the script (git-ignored), and the demo closes and reopens the session to show the conversation survives a restart. No extra dependency is needed, since it uses Python's built-in `sqlite3`:
+
+```bash
+uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-session.py
+```
+
 ## Adding dependencies
 
 ```bash
