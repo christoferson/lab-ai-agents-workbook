@@ -5,6 +5,7 @@ A workbook of standalone AI-agent experiments. Each experiment lives in its own 
 | Folder | Description |
 | --- | --- |
 | `11-openai-agents-sdk-bedrock/` | OpenAI Agents SDK running against Amazon Bedrock |
+| `21-claude-agents-sdk-bedrock/` | Claude Agent SDK running against Amazon Bedrock |
 
 ## Prerequisites
 
@@ -29,8 +30,10 @@ The scripts read the AWS profile and region from environment variables. Create a
 ```dotenv
 AWS_PROFILE=your-profile
 AWS_REGION=us-east-1
-# Optional: defaults to openai.gpt-5.6-luna
+# Optional: model for the OpenAI Agents SDK examples, defaults to openai.gpt-5.6-luna
 BEDROCK_MODEL_ID=openai.gpt-5.6-luna
+# Optional: model for the Claude Agent SDK examples, defaults to global.anthropic.claude-sonnet-5
+CLAUDE_MODEL_ID=global.anthropic.claude-sonnet-5
 ```
 
 Alternatively, export them in your shell:
@@ -81,6 +84,14 @@ To have the SDK manage history for you, run `openai-agent-session.py`. It passes
 
 ```bash
 uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-session.py
+```
+
+### Claude Agent SDK
+
+`claude-agent.py` asks a Claude model on Bedrock a single question and prints the answer plus a run summary (turns, duration, cost). The `claude-agent-sdk` package bundles the Claude Code CLI and runs it in the background, so there's nothing else to install. The script sets `CLAUDE_CODE_USE_BEDROCK=1` so the CLI uses your AWS credentials instead of an Anthropic API key:
+
+```bash
+uv run --env-file .env 21-claude-agents-sdk-bedrock/claude-agent.py
 ```
 
 ## Adding dependencies

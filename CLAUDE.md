@@ -24,3 +24,12 @@ There is no test suite, linter, or build step configured.
 - Tracing is turned off with `set_tracing_disabled(True)` because there is no OpenAI tracing endpoint to export to.
 - Model IDs are Bedrock IDs, read from `BEDROCK_MODEL_ID` (defaults to `openai.gpt-5.6-luna`).
 - AWS credentials and region come from the `AWS_PROFILE` and `AWS_REGION` environment variables, which must be set before running (for example with `uv run --env-file .env ...`).
+
+## Claude Agent SDK pattern
+
+`21-claude-agents-sdk-bedrock/` uses `claude-agent-sdk`, which is a different model from the OpenAI Agents SDK:
+
+- `query(prompt=..., options=ClaudeAgentOptions(...))` spawns the Claude Code CLI bundled in the package as a subprocess and yields `AssistantMessage` / `ResultMessage` objects. There is no client object to register.
+- Bedrock is selected by passing `CLAUDE_CODE_USE_BEDROCK=1` (plus `AWS_PROFILE` / `AWS_REGION`) through `options.env`.
+- Model IDs are Bedrock inference profile IDs, read from `CLAUDE_MODEL_ID` (defaults to `global.anthropic.claude-sonnet-5`).
+- `tools=[]` disables Claude Code's built-in tools (file access, shell, and so on). Enabling them lets the agent act on the machine it runs on.
