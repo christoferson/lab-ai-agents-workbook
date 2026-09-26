@@ -27,7 +27,7 @@ Run all commands below from the repo root.
 | `openai-agent-handoffs.py` | Handoffs between agents |
 | `openai-agent-structured-output.py` | Structured output with a Pydantic model |
 | `openai-agent-guardrails.py` | Input and output guardrails |
-| `openai-agent-deep-research.py` | A deep research pipeline: plan, search, write, publish |
+| `openai-agent-deep-research.py` | A deep research pipeline: plan, search, write, fact-check, publish |
 
 ### Basic agent
 
@@ -127,12 +127,13 @@ uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-guardrails.py -
 
 ### Deep research
 
-`openai-agent-deep-research.py` combines the earlier patterns into a research pipeline, with code deciding the order of four agents:
+`openai-agent-deep-research.py` combines the earlier patterns into a research pipeline, with code deciding the order of five agents. Models don't know today's date, so every agent's instructions include it (in Japan time). This is cheaper and more reliable than a "current time" tool, which would cost an extra model round trip and which the agent might forget to call.
 
 1. A Planner (structured output `SearchPlan`) turns the query into 3 searches, each with a reason.
 2. A Searcher runs every search in parallel with `asyncio.gather`, using `WebSearchTool`. `tool_choice="required"` forces a search, so each summary is grounded in current results rather than the model's memory. The `url_citation` sources from each answer are passed along.
 3. A Writer (structured output `ReportData`) combines the summaries into a Markdown report with a Sources section, a short summary and follow-up questions.
-4. A Publisher saves the report to `reports/` (git-ignored) with a `save_report` tool.
+4. A Fact Checker (structured output `FactCheck`) compares the report against the summaries and can run its own web searches to verify doubtful claims. It flags contradictions, unsupported claims and outdated information. If it finds issues, the Writer revises the report once to fix them.
+5. A Publisher saves the report to `reports/` (git-ignored) with a `save_report` tool.
 
 [Web Search](https://docs.aws.amazon.com/bedrock/latest/userguide/web-search.html) is a Bedrock-hosted tool. Its requirements:
 

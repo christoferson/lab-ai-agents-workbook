@@ -25,7 +25,14 @@ def save_itinerary(title: str, markdown: str) -> str:
     OUTPUT_DIR.mkdir(exist_ok=True)
     slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-") or "itinerary"
     path = OUTPUT_DIR / f"{slug}.md"
-    path.write_text(f"# {title}\n\n{markdown}\n", encoding="utf-8")
+    # Plans on the same topic often get the same title, so number new files instead of overwriting old ones
+    n = 2
+    while path.exists():
+        path = OUTPUT_DIR / f"{slug}-{n}.md"
+        n += 1
+    # The agent often starts the plan with its own H1, so only add one when it's missing
+    body = markdown.strip() if markdown.lstrip().startswith("# ") else f"# {title}\n\n{markdown.strip()}"
+    path.write_text(body + "\n", encoding="utf-8")
     return f"Saved to {path.relative_to(Path(__file__).parent.parent)}"
 
 
