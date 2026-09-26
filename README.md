@@ -92,6 +92,12 @@ To see a multi-agent workflow orchestrated by code, run `openai-agent-workflow.p
 uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-workflow.py
 ```
 
+To let an LLM do the orchestration instead, run `openai-agent-agents-as-tools.py`. The same three planners are wrapped with `agent.as_tool(...)` and given, together with `save_itinerary`, to a "Trip Director" planning agent. The director decides on its own to call each planner, compare the drafts and save the winner, and the script prints each call it made:
+
+```bash
+uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-agents-as-tools.py
+```
+
 ### Claude Agent SDK
 
 `claude-agent.py` asks a Claude model on Bedrock a single question and prints the answer plus a run summary (turns, duration, cost). The `claude-agent-sdk` package bundles the Claude Code CLI and runs it in the background, so there's nothing else to install. The script sets `CLAUDE_CODE_USE_BEDROCK=1` so the CLI uses your AWS credentials instead of an Anthropic API key:
