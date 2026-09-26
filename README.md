@@ -98,6 +98,12 @@ To let an LLM do the orchestration instead, run `openai-agent-agents-as-tools.py
 uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-agents-as-tools.py
 ```
 
+To see handoffs, run `openai-agent-handoffs.py`. The Trip Director still uses the planners as tools, but instead of saving the plan itself it hands off to a Publisher agent (`handoffs=[publisher]`). A tool call returns control to the caller; a handoff transfers the conversation, so the Publisher saves the plan and writes the final reply. The script labels each step with the agent in control:
+
+```bash
+uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-handoffs.py
+```
+
 ### Claude Agent SDK
 
 `claude-agent.py` asks a Claude model on Bedrock a single question and prints the answer plus a run summary (turns, duration, cost). The `claude-agent-sdk` package bundles the Claude Code CLI and runs it in the background, so there's nothing else to install. The script sets `CLAUDE_CODE_USE_BEDROCK=1` so the CLI uses your AWS credentials instead of an Anthropic API key:

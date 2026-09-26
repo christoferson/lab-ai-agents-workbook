@@ -6,12 +6,12 @@ from pathlib import Path
 from openai import AsyncOpenAI
 from openai.providers import bedrock
 # Import the explicit tracing control from the agents SDK
-from agents import Agent, Runner, function_tool, set_default_openai_client, set_tracing_disabled
+from agents import Agent, Runner, function_tool, handoff, set_default_openai_client, set_tracing_disabled
 
 OUTPUT_DIR = Path(__file__).with_name("itineraries")
 
 
-# --- Function tool: the director calls this once it has picked a plan ---
+# --- Function tool: only the Publisher has this ---
 
 @function_tool
 def save_itinerary(title: str, markdown: str) -> str:
@@ -54,7 +54,7 @@ async def main():
     # 4. Register your Bedrock client as default for the OpenAI Agents SDK
     set_default_openai_client(bedrock_client)
 
-    # 5. The same three planners as the code-orchestrated workflow
+    # 5. The same three planners, used as tools (Director -> Planner -> Director)
     format_rule = "Give a morning, afternoon and evening, one line each, naming real places."
     planners = [
         Agent(name="Nature Guide", model=model_id,
@@ -64,31 +64,45 @@ async def main():
         Agent(name="Slow Travel Guide", model=model_id,
               instructions=f"You plan unhurried Tokyo days with long walks, cafés and hot baths. {format_rule}"),
     ]
-
-    # 6. as_tool() wraps each agent as a tool: calling it runs that agent and returns its final output.
-    #    Control comes back to the caller afterwards (Director -> Planner -> Director).
     description = "Drafts a one-day Tokyo plan. In the input, describe the traveler's request."
     tools = [
         planner.as_tool(tool_name=planner.name.lower().replace(" ", "_"), tool_description=description)
         for planner in planners
-    ] + [save_itinerary]
+    ]
 
-    # 7. The planning agent: an LLM, not your code, decides which tools to call and in what order
+    # 6. The Publisher is a handoff target, not a tool. Once the Director hands off,
+    #    the Publisher owns the conversation and its reply is the final output.
+    publisher = Agent(
+        name="Publisher",
+        model=model_id,
+        handoff_description="Formats a chosen day plan as Markdown, saves it and replies to the traveler.",
+        instructions=(
+            "You receive a conversation in which a day plan was chosen. Turn the chosen plan into clean "
+            "Markdown with a short title, save it with save_itinerary, then reply to the traveler with "
+            "a warm two-sentence summary and where the plan was saved."
+        ),
+        tools=[save_itinerary],
+    )
+    handoffs = [publisher]
+
     director = Agent(
         name="Trip Director",
         model=model_id,
         instructions=(
-            "You are a trip director. Your goal is to deliver the single best day plan "
-            "for the traveler using your planner tools."
+            "You are a trip director. Your goal is to find the single best day plan for the traveler "
+            "using your planner tools, then hand off to the Publisher to save and deliver it."
         ),
         tools=tools,
+        handoffs=handoffs,
     )
 
     print("--- Agent graph ---")
-    print(f"{director.name}")
+    print(director.name)
     for tool in director.tools:
-        kind = "agent" if tool.name != save_itinerary.name else "function"
-        print(f"  |- {tool.name} ({kind} tool)")
+        print(f"  |- {tool.name} (agent tool: returns to {director.name})")
+    print(f"  `- {handoff(publisher).tool_name} (handoff: {publisher.name} takes over)")
+    for tool in publisher.tools:
+        print(f"       `- {tool.name} (function tool)")
     print()
 
     task = """
@@ -97,9 +111,8 @@ Traveler's request: one relaxed day in Tokyo in April for someone who loves natu
 Follow these steps:
 1. Generate drafts: call each of the three planner tools once with the traveler's request.
    Do not continue until you have all three drafts.
-2. Evaluate and select: pick the single best plan for this traveler.
-3. Save only the best plan with save_itinerary as clean Markdown with a short title.
-Finally, reply with which planner won, why in one sentence, and where the plan was saved.
+2. Evaluate and select: pick the single best plan and state which planner wrote it and why, in one sentence.
+3. Hand off to the Publisher with only the best plan.
 """.strip()
     print("--- Task ---")
     print(f"{task}\n")
@@ -113,8 +126,8 @@ Finally, reply with which planner won, why in one sentence, and where the plan w
         for item in result.new_items if item.type == "tool_call_output_item"
     }
 
-    # Walk through the decisions the director made: each tool call and what came back
-    print("--- Director's steps ---")
+    # Walk through the run, showing which agent was in control at each step
+    print("--- Steps ---")
     step = 0
     for item in result.new_items:
         if item.type == "tool_call_item":
@@ -124,11 +137,19 @@ Finally, reply with which planner won, why in one sentence, and where the plan w
                 shown = f"title={args.get('title')!r}, markdown=<{len(args.get('markdown', ''))} chars>"
             else:
                 shown = f"input={args.get('input')!r}"
-            print(f"{step}. Called {item.raw_item.name}({shown})")
+            print(f"{step}. [{item.agent.name}] called {item.raw_item.name}({shown})")
             result_text = str(outputs.get(item.raw_item.call_id, "(no result)"))
             print("   Result: " + result_text.replace("\n", "\n           ") + "\n")
+        elif item.type == "handoff_output_item":
+            step += 1
+            print(f"{step}. [{item.source_agent.name}] handed off to {item.target_agent.name}\n")
+        elif item.type == "message_output_item" and item.agent is director:
+            # The Director's reasoning before handing off: which plan it picked and why
+            print(f"   [{director.name}] said: " + "".join(
+                part.text for part in item.raw_item.content if hasattr(part, "text")
+            ) + "\n")
 
-    print("--- Director's Response ---")
+    print(f"--- Final Response (from {result.last_agent.name}) ---")
     print(result.final_output)
 
 if __name__ == "__main__":

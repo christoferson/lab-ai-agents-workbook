@@ -113,6 +113,12 @@ async def main():
     print(f"Running agent on {model_id} via Amazon Bedrock...\n")
     result = await Runner.run(agent, prompt)
 
+    # Tool calls can run in parallel, so match each result to its call by call_id
+    outputs = {
+        item.raw_item["call_id"]: item.output
+        for item in result.new_items if item.type == "tool_call_output_item"
+    }
+
     # Walk through what happened during the run: each tool call and what it returned
     print("--- Agent steps ---")
     step = 0
@@ -121,8 +127,7 @@ async def main():
             step += 1
             args = ", ".join(f"{k}={v}" for k, v in json.loads(item.raw_item.arguments).items())
             print(f"{step}. Called {item.raw_item.name}({args})")
-        elif item.type == "tool_call_output_item":
-            print(f"   Result: {item.output}")
+            print(f"   Result: {outputs.get(item.raw_item.call_id, '(no result)')}")
     if step == 0:
         print("(no tools called)")
 
