@@ -17,6 +17,7 @@ from agents import (
 # No year in the query: the agents get today's date, so they work out which autumn "this autumn" means
 DEFAULT_QUERY = "Best places to see autumn leaves near Tokyo this autumn while avoiding the crowds"
 HOW_MANY_SEARCHES = 3
+MAX_REVIEW_ROUNDS = 3
 OUTPUT_DIR = Path(__file__).with_name("reports")
 
 # Japan has no daylight saving time, so a fixed offset avoids needing the tzdata package on Windows
@@ -32,7 +33,7 @@ def today() -> str:
 # Bedrock hosts the web search tool on the bedrock-mantle endpoint (the default for the bedrock() provider).
 # external_web_access=False keeps retrieval inside AWS: Search uses the Bedrock web index and Fetch its cache.
 # It also works with AmazonBedrockFullAccess, which does not grant bedrock-websearch:ExternalWebAccess.
-web_search = WebSearchTool(search_context_size="low", external_web_access=False)
+web_search = WebSearchTool(search_context_size="medium", external_web_access=False)
 
 # The SDK always sends "filters" and "user_location" (as null), which Bedrock rejects with a 400.
 # extra_body overrides top-level request keys, so it replaces the SDK's tools list with just the supported fields.
@@ -62,7 +63,7 @@ def save_report(title: str, markdown: str) -> str:
     # The writer usually starts the report with its own H1, so only add one when it's missing
     body = markdown.strip() if markdown.lstrip().startswith("# ") else f"# {title}\n\n{markdown.strip()}"
     path.write_text(body + "\n", encoding="utf-8")
-    return f"Saved to {path.relative_to(Path(__file__).parent.parent)}"
+    return f"Saved to {path.relative_to(Path(__file__).parent.parent).as_posix()}"
 
 
 # --- Structured outputs that hand data from one stage to the next ---
@@ -79,7 +80,8 @@ class SearchPlan(BaseModel):
 class ReportData(BaseModel):
     short_summary: str = Field(description="A 2-3 sentence summary of the findings")
     markdown_report: str = Field(description="The final report in Markdown, ending with a Sources section")
-    follow_up_questions: list[str] = Field(description="Suggested topics to research further")
+    follow_up_questions: list[str] = Field(
+        description="Suggested topics to research further, as research questions, not questions to the traveler")
 
 
 class FactIssue(BaseModel):
@@ -153,7 +155,9 @@ def extract_sources(result) -> list[str]:
         if item.type == "message_output_item":
             for block in item.raw_item.content:
                 for ann in getattr(block, "annotations", None) or []:
-                    source = f"{ann.title}: {clean_url(ann.url)}"
+                    url = clean_url(ann.url)
+                    # Some pages have no title, and Bedrock then puts the URL in the title too
+                    source = url if not ann.title or ann.title == ann.url else f"{ann.title}: {url}"
                     if ann.type == "url_citation" and source not in sources:
                         sources.append(source)
     return sources
@@ -210,9 +214,15 @@ async def write_report(writer: Agent, query: str, summaries: list[str]) -> Repor
     return report
 
 
-async def check_facts(fact_checker: Agent, report: ReportData, summaries: list[str]) -> FactCheck:
-    print(f"4. {fact_checker.name}: checking the report against the summaries...")
-    result = await Runner.run(fact_checker, f"Report:\n{report.markdown_report}\n\nSearch summaries: {summaries}")
+async def check_facts(fact_checker: Agent, report: ReportData, summaries: list[str], round_no: int,
+                      fixed: list[FactIssue]) -> FactCheck:
+    print(f"4. {fact_checker.name} (round {round_no}/{MAX_REVIEW_ROUNDS}): checking the report...")
+    prompt = f"Report:\n{report.markdown_report}\n\nSearch summaries: {summaries}"
+    if fixed:
+        # Without this, a later round can re-flag a fixed claim or undo a correction
+        done = "\n".join(f"- {i.claim} -> {i.correction}" for i in fixed)
+        prompt += f"\n\nCorrections already applied in earlier rounds (don't re-flag them unless still wrong):\n{done}"
+    result = await Runner.run(fact_checker, prompt)
     check = result.final_output
     searches = [i.raw_item for i in result.new_items if i.type == "tool_call_item"]
     print(f"   {len(check.issues)} issue(s) found, {len(searches)} verification search(es)")
@@ -229,9 +239,7 @@ async def check_facts(fact_checker: Agent, report: ReportData, summaries: list[s
 
 
 async def revise_report(writer: Agent, report: ReportData, check: FactCheck, summaries: list[str]) -> ReportData:
-    """Have the writer fix the fact checker's issues, or return the report unchanged if there are none."""
-    if not check.issues:
-        return report
+    """Have the writer fix the fact checker's issues."""
     print(f"   {writer.name}: revising the report to fix {len(check.issues)} issue(s)...")
     issues = "\n".join(f"- {i.claim} -> {i.correction}" for i in check.issues)
     # Send the whole ReportData, so the writer keeps the follow-up questions and summarizes findings, not its edits
@@ -244,6 +252,21 @@ async def revise_report(writer: Agent, report: ReportData, check: FactCheck, sum
     revised = result.final_output
     print(f"   Revised summary: {revised.short_summary}\n")
     return revised
+
+
+async def review_report(fact_checker: Agent, writer: Agent, report: ReportData, summaries: list[str]) -> ReportData:
+    """Check and revise until the fact checker finds no issues, for at most MAX_REVIEW_ROUNDS rounds."""
+    fixed: list[FactIssue] = []
+    for round_no in range(1, MAX_REVIEW_ROUNDS + 1):
+        check = await check_facts(fact_checker, report, summaries, round_no, fixed)
+        if not check.issues:
+            print(f"   Review passed in round {round_no}.\n")
+            return report
+        report = await revise_report(writer, report, check, summaries)
+        fixed += check.issues
+    # The cap stops a checker that keeps finding something from looping (and costing) forever
+    print(f"   Stopped after {MAX_REVIEW_ROUNDS} rounds; the last revision was not re-checked.\n")
+    return report
 
 
 async def publish_report(publisher: Agent, report: ReportData) -> str:
@@ -287,7 +310,8 @@ async def main(query: str):
     print(f"2. {agents['searcher'].name}:     each search -> summary with sources, using web search, in parallel")
     print(f"3. {agents['writer'].name}:       summaries -> {ReportData.__name__} (structured output)")
     print(f"4. {agents['fact_checker'].name}: report -> {FactCheck.__name__} (structured output, may use web search);")
-    print("                   if it finds issues, the Writer revises the report once")
+    print(f"                   while it finds issues, the Writer revises and it re-checks "
+          f"(up to {MAX_REVIEW_ROUNDS} rounds)")
     print(f"5. {agents['publisher'].name}:    report -> Markdown file, using the save_report tool")
     print(f"Date given to agents: {today()} (Japan time)")
     print(f"Web search: search_context_size={web_search.search_context_size!r}, "
@@ -300,8 +324,7 @@ async def main(query: str):
     plan = await plan_searches(agents["planner"], query)
     summaries = await run_searches(agents["searcher"], plan)
     report = await write_report(agents["writer"], query, summaries)
-    check = await check_facts(agents["fact_checker"], report, summaries)
-    report = await revise_report(agents["writer"], report, check, summaries)
+    report = await review_report(agents["fact_checker"], agents["writer"], report, summaries)
     await publish_report(agents["publisher"], report)
 
     print("--- Report ---")

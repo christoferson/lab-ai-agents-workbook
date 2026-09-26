@@ -132,7 +132,7 @@ uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-guardrails.py -
 1. A Planner (structured output `SearchPlan`) turns the query into 3 searches, each with a reason.
 2. A Searcher runs every search in parallel with `asyncio.gather`, using `WebSearchTool`. `tool_choice="required"` forces a search, so each summary is grounded in current results rather than the model's memory. The `url_citation` sources from each answer are passed along.
 3. A Writer (structured output `ReportData`) combines the summaries into a Markdown report with a Sources section, a short summary and follow-up questions.
-4. A Fact Checker (structured output `FactCheck`) compares the report against the summaries and can run its own web searches to verify doubtful claims. It flags contradictions, unsupported claims and outdated information. If it finds issues, the Writer revises the report once to fix them.
+4. A Fact Checker (structured output `FactCheck`) compares the report against the summaries and can run its own web searches to verify doubtful claims. It flags contradictions, unsupported claims and outdated information. If it finds issues, the Writer revises the report and the Fact Checker checks it again, told which corrections were already made. This review loop runs in code and stops when a check passes or after `MAX_REVIEW_ROUNDS` (3) rounds.
 5. A Publisher saves the report to `reports/` (git-ignored) with a `save_report` tool.
 
 [Web Search](https://docs.aws.amazon.com/bedrock/latest/userguide/web-search.html) is a Bedrock-hosted tool. Its requirements:
