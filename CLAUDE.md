@@ -31,5 +31,5 @@ There is no test suite, linter, or build step configured.
 
 - `query(prompt=..., options=ClaudeAgentOptions(...))` spawns the Claude Code CLI bundled in the package as a subprocess and yields `AssistantMessage` / `ResultMessage` objects. There is no client object to register.
 - Bedrock is selected by passing `CLAUDE_CODE_USE_BEDROCK=1` (plus `AWS_PROFILE` / `AWS_REGION`) through `options.env`.
-- Model IDs are Bedrock inference profile IDs, read from `CLAUDE_MODEL_ID` (defaults to `global.anthropic.claude-sonnet-5`).
+- Model IDs are Bedrock inference profile IDs, read from `BEDROCK_CLAUDE_MODEL_ID` (defaults to `global.anthropic.claude-sonnet-5`).
 - `tools=[]` disables Claude Code's built-in tools (file access, shell, and so on). Enabling them lets the agent act on the machine it runs on.

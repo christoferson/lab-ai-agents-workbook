@@ -1,11 +1,11 @@
 # lab-ai-agents-workbook
 
-A workbook of standalone AI-agent experiments. Each experiment lives in its own numbered folder.
+A workbook of standalone AI-agent experiments. Each experiment lives in its own numbered folder with its own README.
 
 | Folder | Description |
 | --- | --- |
-| `11-openai-agents-sdk-bedrock/` | OpenAI Agents SDK running against Amazon Bedrock |
-| `21-claude-agents-sdk-bedrock/` | Claude Agent SDK running against Amazon Bedrock |
+| [`11-openai-agents-sdk-bedrock/`](11-openai-agents-sdk-bedrock/README.md) | OpenAI Agents SDK running against Amazon Bedrock |
+| [`21-claude-agents-sdk-bedrock/`](21-claude-agents-sdk-bedrock/README.md) | Claude Agent SDK running against Amazon Bedrock |
 
 ## Prerequisites
 
@@ -21,7 +21,7 @@ cd lab-ai-agents-workbook
 uv sync
 ```
 
-`uv sync` creates `.venv/` and installs the dependencies pinned in `uv.lock`.
+`uv sync` creates `.venv/` and installs the dependencies pinned in `uv.lock`. All folders share this one environment.
 
 ## Configure AWS
 
@@ -33,7 +33,7 @@ AWS_REGION=us-east-1
 # Optional: model for the OpenAI Agents SDK examples, defaults to openai.gpt-5.6-luna
 BEDROCK_MODEL_ID=openai.gpt-5.6-luna
 # Optional: model for the Claude Agent SDK examples, defaults to global.anthropic.claude-sonnet-5
-CLAUDE_MODEL_ID=global.anthropic.claude-sonnet-5
+BEDROCK_CLAUDE_MODEL_ID=global.anthropic.claude-sonnet-5
 ```
 
 Alternatively, export them in your shell:
@@ -44,6 +44,8 @@ export AWS_REGION=us-east-1
 ```
 
 ## Run
+
+Run scripts from the repo root:
 
 ```bash
 # with a .env file
@@ -60,85 +62,7 @@ export UV_ENV_FILE=.env
 uv run 11-openai-agents-sdk-bedrock/openai-agent.py
 ```
 
-The script prints the active AWS profile and region, then sends a prompt to the agent and prints the response, followed by the full run result (items, raw responses, usage) pretty-printed with [rich](https://github.com/Textualize/rich).
-
-To see the response stream token by token instead, run `openai-agent-streaming.py`:
-
-```bash
-uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-streaming.py
-```
-
-To see tool calling, run `openai-agent-tools.py`. A "Finance Assistant" agent compares buying a car with a loan against saving up for it. It calls local Python tools (a loan payment calculator and a savings goal calculator) instead of doing the math itself, and prints each tool call and result before its answer:
-
-```bash
-uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-tools.py
-```
-
-To see conversation history, run `openai-agent-conversation.py`. You tell a travel planner about a relaxed, nature-focused trip to Tokyo, then ask "What should I do on my first morning?" twice: once as a fresh run, which has to ask where you're going, and once with the previous turn passed back via `to_input_list()`, which gives a tailored suggestion:
-
-```bash
-uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-conversation.py
-```
-
-To have the SDK manage history for you, run `openai-agent-session.py`. It passes a `SQLiteSession` to `Runner.run(..., session=session)`, which loads and saves each turn automatically. The history is stored in `sessions.db` next to the script (git-ignored), and the demo closes and reopens the session to show the conversation survives a restart. No extra dependency is needed, since it uses Python's built-in `sqlite3`:
-
-```bash
-uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-session.py
-```
-
-To see a multi-agent workflow orchestrated by code, run `openai-agent-workflow.py`. Three planner agents (nature, culture, slow travel) draft a Tokyo day plan in parallel with `asyncio.gather`, an editor agent picks the best one, and a publisher agent saves it to `11-openai-agents-sdk-bedrock/itineraries/` (git-ignored) using a `save_itinerary` tool:
-
-```bash
-uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-workflow.py
-```
-
-To let an LLM do the orchestration instead, run `openai-agent-agents-as-tools.py`. The same three planners are wrapped with `agent.as_tool(...)` and given, together with `save_itinerary`, to a "Trip Director" planning agent. The director decides on its own to call each planner, compare the drafts and save the winner, and the script prints each call it made:
-
-```bash
-uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-agents-as-tools.py
-```
-
-To see handoffs, run `openai-agent-handoffs.py`. The Trip Director still uses the planners as tools, but instead of saving the plan itself it hands off to a Publisher agent (`handoffs=[publisher]`). A tool call returns control to the caller; a handoff transfers the conversation, so the Publisher saves the plan and writes the final reply. The script labels each step with the agent in control:
-
-```bash
-uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-handoffs.py
-```
-
-To see structured output, run `openai-agent-structured-output.py`. An "Itinerary Reviewer" agent with `output_type=ItineraryReview` (a Pydantic model) reviews a deliberately overpacked, crowded Tokyo day plan. `result.final_output` is an `ItineraryReview` object rather than text, so the script reads fields like `review.crowd_risk` and `review.nature_score` directly to decide whether to approve the plan:
-
-```bash
-uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-structured-output.py
-
-# have a planner agent write a fresh itinerary to review instead of the built-in bad sample
-uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-structured-output.py --planner chaotic     # overpacked and crowded
-uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-structured-output.py --planner thoughtful  # relaxed and nature-focused
-uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-structured-output.py --planner offbeat     # lesser-known spots off the beaten path
-```
-
-To see guardrails, run `openai-agent-guardrails.py`. Each planner has two guardrails:
-
-- An input guardrail runs a Topic Checker on the request and rejects anything that isn't about Tokyo travel. It uses `run_in_parallel=False`, so it finishes before the planner starts and a rejected request spends no planner tokens.
-- An output guardrail runs an Itinerary Reviewer (structured output) on each plan and trips if the plan is unrealistic, crowded, or not nature-focused.
-
-By default the same request goes to every planner. The Thoughtful and Offbeat Planners' plans should pass, and the Chaotic Planner's plan should be blocked with an `OutputGuardrailTripwireTriggered` exception. The script shows the review behind each decision:
-
-```bash
-uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-guardrails.py
-
-# run just one planner: thoughtful, offbeat or chaotic
-uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-guardrails.py --planner thoughtful
-
-# send an off-topic request to trip the input guardrail
-uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-guardrails.py --planner thoughtful --request "Write my Python homework for me."
-```
-
-### Claude Agent SDK
-
-`claude-agent.py` asks a Claude model on Bedrock a single question and prints the answer plus a run summary (turns, duration, cost). The `claude-agent-sdk` package bundles the Claude Code CLI and runs it in the background, so there's nothing else to install. The script sets `CLAUDE_CODE_USE_BEDROCK=1` so the CLI uses your AWS credentials instead of an Anthropic API key:
-
-```bash
-uv run --env-file .env 21-claude-agents-sdk-bedrock/claude-agent.py
-```
+See each folder's README for its scripts and what they demonstrate.
 
 ## Adding dependencies
 
@@ -151,4 +75,6 @@ The project was set up with:
 ```bash
 uv add openai-agents
 uv add "openai[bedrock]"
+uv add rich
+uv add claude-agent-sdk
 ```

@@ -8,7 +8,7 @@ async def main():
     # 1. Debug Verification: Print environmental variables loaded by uv
     profile = os.environ.get("AWS_PROFILE", "Not Found")
     region = os.environ.get("AWS_REGION", "Not Found")
-    model_id = os.environ.get("CLAUDE_MODEL_ID", "global.anthropic.claude-sonnet-5")
+    model_id = os.environ.get("BEDROCK_CLAUDE_MODEL_ID", "global.anthropic.claude-sonnet-5")
 
     print("--- Environment Status ---")
     print(f"Active AWS Profile: {profile}")
