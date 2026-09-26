@@ -108,6 +108,11 @@ To see structured output, run `openai-agent-structured-output.py`. An "Itinerary
 
 ```bash
 uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-structured-output.py
+
+# have a planner agent write a fresh itinerary to review instead of the built-in bad sample
+uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-structured-output.py --planner chaotic     # overpacked and crowded
+uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-structured-output.py --planner thoughtful  # relaxed and nature-focused
+uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-structured-output.py --planner offbeat     # lesser-known spots off the beaten path
 ```
 
 ### Claude Agent SDK
