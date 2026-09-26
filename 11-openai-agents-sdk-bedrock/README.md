@@ -27,6 +27,7 @@ Run all commands below from the repo root.
 | `openai-agent-handoffs.py` | Handoffs between agents |
 | `openai-agent-structured-output.py` | Structured output with a Pydantic model |
 | `openai-agent-guardrails.py` | Input and output guardrails |
+| `openai-agent-deep-research.py` | A deep research pipeline: plan, search, write, publish |
 
 ### Basic agent
 
@@ -122,4 +123,30 @@ uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-guardrails.py -
 
 # send an off-topic request to trip the input guardrail
 uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-guardrails.py --planner thoughtful --request "Write my Python homework for me."
+```
+
+### Deep research
+
+`openai-agent-deep-research.py` combines the earlier patterns into a research pipeline, with code deciding the order of four agents:
+
+1. A Planner (structured output `SearchPlan`) turns the query into 3 searches, each with a reason.
+2. A Searcher runs every search in parallel with `asyncio.gather`, using `WebSearchTool`. `tool_choice="required"` forces a search, so each summary is grounded in current results rather than the model's memory. The `url_citation` sources from each answer are passed along.
+3. A Writer (structured output `ReportData`) combines the summaries into a Markdown report with a Sources section, a short summary and follow-up questions.
+4. A Publisher saves the report to `reports/` (git-ignored) with a `save_report` tool.
+
+[Web Search](https://docs.aws.amazon.com/bedrock/latest/userguide/web-search.html) is a Bedrock-hosted tool. Its requirements:
+
+- It runs on the `bedrock-mantle` endpoint with the Responses API, which is what the `bedrock()` provider and the Agents SDK use by default.
+- It needs a supported model, such as the `openai.gpt-5.6` family, and region (`us-east-1`, `us-east-2` or `us-west-2`).
+- Your IAM identity needs `bedrock-websearch:InvokeSearch` and `bedrock-websearch:InvokeFetch`, which `AmazonBedrockFullAccess` grants.
+
+The script sets `external_web_access=False`, so searches are served from the Bedrock web index and cache and your request data stays inside AWS. Setting it to `True` also needs the `bedrock-websearch:ExternalWebAccess` permission.
+
+The SDK's `WebSearchTool` always sends `filters` and `user_location` fields, even when they're empty, and Bedrock rejects them with a 400 error. The Searcher therefore passes a clean tool definition through `ModelSettings(extra_body={"tools": [...]})`, which replaces the SDK's `tools` list in the request.
+
+```bash
+uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-deep-research.py
+
+# research your own question
+uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-deep-research.py --query "A quiet day trip from Tokyo with hiking and a hot spring"
 ```
