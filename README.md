@@ -104,6 +104,12 @@ To see handoffs, run `openai-agent-handoffs.py`. The Trip Director still uses th
 uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-handoffs.py
 ```
 
+To see structured output, run `openai-agent-structured-output.py`. An "Itinerary Reviewer" agent with `output_type=ItineraryReview` (a Pydantic model) reviews a deliberately overpacked, crowded Tokyo day plan. `result.final_output` is an `ItineraryReview` object rather than text, so the script reads fields like `review.crowd_risk` and `review.nature_score` directly to decide whether to approve the plan:
+
+```bash
+uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-structured-output.py
+```
+
 ### Claude Agent SDK
 
 `claude-agent.py` asks a Claude model on Bedrock a single question and prints the answer plus a run summary (turns, duration, cost). The `claude-agent-sdk` package bundles the Claude Code CLI and runs it in the background, so there's nothing else to install. The script sets `CLAUDE_CODE_USE_BEDROCK=1` so the CLI uses your AWS credentials instead of an Anthropic API key:
