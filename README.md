@@ -115,6 +115,15 @@ uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-structured-outp
 uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-structured-output.py --planner offbeat     # lesser-known spots off the beaten path
 ```
 
+To see guardrails, run `openai-agent-guardrails.py`. An output guardrail runs an Itinerary Reviewer (structured output) on each plan and trips if the plan is unrealistic, crowded, or not nature-focused. By default the same request goes to every planner. The Thoughtful and Offbeat Planners' plans should pass, and the Chaotic Planner's plan should be blocked with an `OutputGuardrailTripwireTriggered` exception. The script shows the review behind each decision:
+
+```bash
+uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-guardrails.py
+
+# run just one planner: thoughtful, offbeat or chaotic
+uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-guardrails.py --planner thoughtful
+```
+
 ### Claude Agent SDK
 
 `claude-agent.py` asks a Claude model on Bedrock a single question and prints the answer plus a run summary (turns, duration, cost). The `claude-agent-sdk` package bundles the Claude Code CLI and runs it in the background, so there's nothing else to install. The script sets `CLAUDE_CODE_USE_BEDROCK=1` so the CLI uses your AWS credentials instead of an Anthropic API key:
