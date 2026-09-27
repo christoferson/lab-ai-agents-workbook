@@ -1,7 +1,9 @@
 import asyncio
 import os
 import sys
-from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient, ResultMessage, get_session_messages
+from claude_agent_sdk import (
+    ClaudeAgentOptions, ClaudeSDKClient, ResultMessage, delete_session, get_session_messages,
+)
 
 
 async def ask(client: ClaudeSDKClient, prompt: str) -> ResultMessage:
@@ -95,6 +97,11 @@ async def main():
     print_history(turn1.session_id)
     print(f"\n--- History of client_no_conversation (session {forgetful.session_id}) ---")
     print_history(forgetful.session_id)
+
+    # 7. Clean up: delete_session() removes each saved transcript, so no files are left behind
+    for session_id in (turn1.session_id, forgetful.session_id):
+        delete_session(session_id)
+    print("\n--- Both sessions deleted (delete_session) ---")
 
 if __name__ == "__main__":
     # Model output contains characters like em dashes that Windows code pages (e.g. cp932) can't encode

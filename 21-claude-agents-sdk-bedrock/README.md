@@ -22,6 +22,7 @@ Run all commands below from the repo root.
 | `claude-agent-streaming.py` | Streaming the response as it is generated |
 | `claude-agent-tools.py` | Custom Python tools, served by an in-process MCP server |
 | `claude-agent-conversation.py` | Conversation history with `ClaudeSDKClient` |
+| `claude-agent-session.py` | Saved sessions: a fixed `session_id`, then `resume` from a new client |
 
 ### Basic agent
 
@@ -62,8 +63,23 @@ With the OpenAI Agents SDK you keep the history yourself and pass it back with `
 
 - Each `ClaudeSDKClient` runs its own Claude Code CLI process, and that process remembers everything said on it. The client *is* the session: ask the same client again to continue, or use a new client to start fresh. (A one-off `query()` call also starts fresh.)
 - Each turn is `client.query(...)` followed by reading the reply from `client.receive_response()`.
-- The CLI saves each session as a transcript under `~/.claude/projects/`, and `get_session_messages(session_id)` reads it back, which the script uses to print both sessions' history.
+- The CLI saves each session as a transcript under `~/.claude/projects/`, and `get_session_messages(session_id)` reads it back, which the script uses to print both sessions' history. At the end, `delete_session(session_id)` removes both transcripts.
 
 ```bash
 uv run --env-file .env 21-claude-agents-sdk-bedrock/claude-agent-conversation.py
+```
+
+### Sessions
+
+`claude-agent-session.py` is the Claude version of `openai-agent-session.py`. It has two turns with a travel planner, closes the client, then continues the conversation from a brand-new client, as if the app had restarted.
+
+In `claude-agent-conversation.py` the conversation lived only as long as the client was open. Here a session ID brings it back:
+
+- `ClaudeAgentOptions(session_id=...)` starts a session under an ID you choose. It must be a UUID, so the script derives a fixed one from the name `tokyo-trip` with `uuid.uuid5`.
+- `ClaudeAgentOptions(resume=...)` makes a new client load that session's history before its first turn.
+- There is no database to set up: the CLI already saves each session as `~/.claude/projects/<project folder>/<session id>.jsonl`, and `resume` reads it back. The script prints that path and the stored messages (`get_session_messages`).
+- `delete_session(...)` removes the saved transcript, so the session can no longer be resumed. The script calls it at the end to clean up, and also at the start in case an earlier run stopped before its clean-up, so every run starts the same way, like `clear_session()` in the OpenAI version.
+
+```bash
+uv run --env-file .env 21-claude-agents-sdk-bedrock/claude-agent-session.py
 ```
