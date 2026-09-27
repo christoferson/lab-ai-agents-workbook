@@ -6,6 +6,7 @@ A workbook of standalone AI-agent experiments. Each experiment lives in its own 
 | --- | --- |
 | [`11-openai-agents-sdk-bedrock/`](11-openai-agents-sdk-bedrock/README.md) | OpenAI Agents SDK running against Amazon Bedrock |
 | [`21-claude-agents-sdk-bedrock/`](21-claude-agents-sdk-bedrock/README.md) | Claude Agent SDK running against Amazon Bedrock |
+| [`31-strands-agents-sdk-bedrock/`](31-strands-agents-sdk-bedrock/README.md) | Strands Agents SDK running against Amazon Bedrock |
 
 ## Prerequisites
 
@@ -32,7 +33,7 @@ AWS_PROFILE=your-profile
 AWS_REGION=us-east-1
 # Optional: model for the OpenAI Agents SDK examples, defaults to openai.gpt-5.6-luna
 BEDROCK_MODEL_ID=openai.gpt-5.6-luna
-# Optional: model for the Claude Agent SDK examples, defaults to global.anthropic.claude-sonnet-5
+# Optional: model for the Claude Agent SDK and Strands examples, defaults to global.anthropic.claude-sonnet-5
 BEDROCK_CLAUDE_MODEL_ID=global.anthropic.claude-sonnet-5
 ```
 
@@ -77,4 +78,5 @@ uv add openai-agents
 uv add "openai[bedrock]"
 uv add rich
 uv add claude-agent-sdk
+uv add strands-agents
 ```

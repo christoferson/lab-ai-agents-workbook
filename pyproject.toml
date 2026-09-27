@@ -9,4 +9,5 @@ dependencies = [
     "openai-agents>=0.22.3",
     "openai[bedrock]>=3.19.2",
     "rich>=15.0.0",
+    "strands-agents>=1.57.1",
 ]

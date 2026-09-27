@@ -33,3 +33,12 @@ There is no test suite, linter, or build step configured.
 - Bedrock is selected by passing `CLAUDE_CODE_USE_BEDROCK=1` (plus `AWS_PROFILE` / `AWS_REGION`) through `options.env`.
 - Model IDs are Bedrock inference profile IDs, read from `BEDROCK_CLAUDE_MODEL_ID` (defaults to `global.anthropic.claude-sonnet-5`).
 - `tools=[]` disables Claude Code's built-in tools (file access, shell, and so on). Enabling them lets the agent act on the machine it runs on.
+
+## Strands Agents SDK pattern
+
+`31-strands-agents-sdk-bedrock/` uses `strands-agents`, AWS's agent SDK:
+
+- `Agent(model=BedrockModel(model_id=..., boto_session=boto3.Session(profile_name=..., region_name=...)), system_prompt=...)`. Calling `agent(prompt)` is synchronous and returns an `AgentResult`, and `str(result)` gives the final text.
+- Always pass `model=` explicitly. A bare `Agent()` falls back to a default Bedrock model.
+- Pass `callback_handler=None` unless you want the default handler to print the response as it streams.
+- Model IDs come from `BEDROCK_CLAUDE_MODEL_ID` (defaults to `global.anthropic.claude-sonnet-5`), shared with the Claude examples.
