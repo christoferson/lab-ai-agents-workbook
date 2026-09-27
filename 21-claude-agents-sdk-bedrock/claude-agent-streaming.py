@@ -1,7 +1,7 @@
 import asyncio
 import os
 import sys
-from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, ResultMessage, TextBlock, query
+from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, StreamEvent, query
 
 
 async def main():
@@ -17,8 +17,8 @@ async def main():
     print(f"Claude Model ID:    {model_id}")
     print("--------------------------\n")
 
-    # 2. Configure the agent. The SDK runs the bundled Claude Code CLI as a subprocess;
-    #    CLAUDE_CODE_USE_BEDROCK=1 tells it to call Amazon Bedrock with your AWS credentials.
+    # 2. Configure the agent. include_partial_messages=True makes query() also yield StreamEvent
+    #    messages: the raw stream events from the model, including each piece of text as it is generated.
     system_prompt = "You explain AI agent concepts clearly and concisely to developers."
     options = ClaudeAgentOptions(
         model=model_id,
@@ -26,35 +26,36 @@ async def main():
         tools=[],  # no built-in tools (file access, shell, ...): a plain question-and-answer agent
         max_turns=1,
         setting_sources=[],  # don't load ~/.claude or project settings and CLAUDE.md files into the agent
+        include_partial_messages=True,
         env={"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": profile, "AWS_REGION": region},
     )
 
     print("--- Agent ---")
     print(f"System prompt: {system_prompt}\n")
 
-    # 3. Send the prompt; query() streams back messages as the agent works
-    prompt = "In 3 sentences, what is the Claude Agent SDK and how does it differ from calling the Claude API directly?"
+    prompt = "List the 5 core building blocks of an AI agent, one line each."
     print("--- Prompt ---")
     print(f"{prompt}\n")
 
-    print(f"Running agent on {model_id} via Amazon Bedrock...\n")
-    print("--- Agent Response ---")
+    print(f"Streaming response from {model_id} via Amazon Bedrock...\n")
+
+    # 3. Print each text delta as it arrives. The complete AssistantMessage still comes afterwards,
+    #    so it is skipped here to avoid printing the answer twice.
+    print("--- Agent Response (streaming) ---")
     async for message in query(prompt=prompt, options=options):
-        if isinstance(message, AssistantMessage):
-            for block in message.content:
-                if isinstance(block, TextBlock):
-                    print(block.text)
+        if isinstance(message, StreamEvent):
+            event = message.event
+            if event.get("type") == "content_block_delta" and event["delta"].get("type") == "text_delta":
+                print(event["delta"]["text"], end="", flush=True)
         elif isinstance(message, ResultMessage):
-            # The final message summarizes the run
-            print("\n--- Run Summary ---")
+            print("\n\n--- Run Summary ---")
             print(f"Status:   {'error' if message.is_error else 'success'}")
-            print(f"Turns:    {message.num_turns}")
             print(f"Duration: {message.duration_ms / 1000:.1f}s")
             if message.total_cost_usd is not None:
                 print(f"Cost:     ${message.total_cost_usd:.4f}")
 
 if __name__ == "__main__":
-    # Model output contains characters like em dashes that Windows code pages (e.g. cp932) can't encode
+    # Model output contains characters like en dashes that Windows code pages (e.g. cp932) can't encode
     # when output is redirected to a file, so always write UTF-8
     sys.stdout.reconfigure(encoding="utf-8")
     asyncio.run(main())

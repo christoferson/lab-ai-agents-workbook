@@ -10,6 +10,7 @@ The Claude Agent SDK works differently from the OpenAI Agents SDK:
 - Passing `CLAUDE_CODE_USE_BEDROCK=1` (plus `AWS_PROFILE` / `AWS_REGION`) through `options.env` makes the CLI use your AWS credentials instead of an Anthropic API key.
 - The model is a Bedrock inference profile ID, read from `BEDROCK_CLAUDE_MODEL_ID` (defaults to `global.anthropic.claude-sonnet-5`).
 - `tools=[]` disables Claude Code's built-in tools (file access, shell, and so on). If you enable them, the agent can act on the machine it runs on.
+- `setting_sources=[]` stops the CLI from loading your `~/.claude` settings and the repo's `CLAUDE.md`. Without it, the agent picks up that context (for example, it mentions "the SDKs this repo uses").
 
 Run all commands below from the repo root.
 
@@ -18,6 +19,7 @@ Run all commands below from the repo root.
 | Script | Shows |
 | --- | --- |
 | `claude-agent.py` | A single question and a run summary |
+| `claude-agent-streaming.py` | Streaming the response as it is generated |
 
 ### Basic agent
 
@@ -25,4 +27,12 @@ Run all commands below from the repo root.
 
 ```bash
 uv run --env-file .env 21-claude-agents-sdk-bedrock/claude-agent.py
+```
+
+### Streaming
+
+`claude-agent-streaming.py` prints the answer as it is generated, like `openai-agent-streaming.py` in the OpenAI folder. With `include_partial_messages=True`, `query()` also yields `StreamEvent` messages that carry the raw model stream events; the script prints the text from each `content_block_delta` event:
+
+```bash
+uv run --env-file .env 21-claude-agents-sdk-bedrock/claude-agent-streaming.py
 ```
