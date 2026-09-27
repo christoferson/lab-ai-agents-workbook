@@ -23,6 +23,7 @@ Run all commands below from the repo root.
 | `claude-agent-tools.py` | Custom Python tools, served by an in-process MCP server |
 | `claude-agent-conversation.py` | Conversation history with `ClaudeSDKClient` |
 | `claude-agent-session.py` | Saved sessions: a fixed `session_id`, then `resume` from a new client |
+| `claude-agent-workflow.py` | Multi-agent workflow orchestrated by code |
 
 ### Basic agent
 
@@ -82,4 +83,20 @@ In `claude-agent-conversation.py` the conversation lived only as long as the cli
 
 ```bash
 uv run --env-file .env 21-claude-agents-sdk-bedrock/claude-agent-session.py
+```
+
+### Workflow orchestrated by code
+
+`claude-agent-workflow.py` is the Claude version of `openai-agent-workflow.py`. Three planner agents (nature, culture, slow travel) draft a Tokyo day plan in parallel with `asyncio.gather`. An editor agent picks the best one, and a publisher agent saves it to `itineraries/claude/` (git-ignored) using a `save_itinerary` tool.
+
+The Claude Agent SDK has no `Agent` class or `Runner`, so the script builds them from what the earlier examples used:
+
+- An agent is a small dataclass (name, system prompt, tools), and `make_options(...)` turns it into `ClaudeAgentOptions`. Only the publisher gets an MCP server and `allowed_tools`.
+- `run_agent(...)` runs one agent with its own `query()` call, so each agent is a separate Claude Code CLI process. The three planners' processes run at the same time.
+- Each agent starts with no memory of the others. The code passes results along as prompts: the drafts go to the editor, and the editor's pick goes to the publisher.
+- Each `query()` reports its own cost, so the script adds them up for the whole workflow.
+- Each `query()` also saves its session as a transcript. The workflow never resumes them, so at the end the script deletes all five with `delete_session(...)`.
+
+```bash
+uv run --env-file .env 21-claude-agents-sdk-bedrock/claude-agent-workflow.py
 ```
