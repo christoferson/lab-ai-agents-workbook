@@ -20,6 +20,7 @@ Run all commands below from the repo root.
 | --- | --- |
 | `claude-agent.py` | A single question and a run summary |
 | `claude-agent-streaming.py` | Streaming the response as it is generated |
+| `claude-agent-tools.py` | Custom Python tools, served by an in-process MCP server |
 
 ### Basic agent
 
@@ -35,4 +36,19 @@ uv run --env-file .env 21-claude-agents-sdk-bedrock/claude-agent.py
 
 ```bash
 uv run --env-file .env 21-claude-agents-sdk-bedrock/claude-agent-streaming.py
+```
+
+### Tools
+
+`claude-agent-tools.py` is the Claude version of `openai-agent-tools.py`: a "Finance Assistant" compares buying a car with a loan against saving up for it, using a loan payment calculator and a savings goal calculator instead of doing the math itself. It prints each tool call and result before the answer.
+
+Custom tools work differently from the OpenAI Agents SDK's `@function_tool`:
+
+- `@tool(name, description, input_schema)` defines a tool. Each parameter is described with `Annotated[type, "description"]`, and the tool returns MCP-style content (`{"content": [{"type": "text", "text": ...}]}`).
+- The agent doesn't take the tools directly. `create_sdk_mcp_server(...)` puts them in an MCP server that runs inside the Python process, and `mcp_servers={...}` gives it to the agent, which sees each tool as `mcp__<server>__<tool>`.
+- Tools need permission to run, and a script has no one to ask, so `allowed_tools` pre-approves them. `tools=[]` still turns off the built-in tools only.
+- Tool calls come back as `ToolUseBlock`s in `AssistantMessage`s, and their results as `ToolResultBlock`s in `UserMessage`s, matched by `tool_use_id`.
+
+```bash
+uv run --env-file .env 21-claude-agents-sdk-bedrock/claude-agent-tools.py
 ```
