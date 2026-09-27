@@ -21,6 +21,7 @@ Run all commands below from the repo root.
 | `claude-agent.py` | A single question and a run summary |
 | `claude-agent-streaming.py` | Streaming the response as it is generated |
 | `claude-agent-tools.py` | Custom Python tools, served by an in-process MCP server |
+| `claude-agent-conversation.py` | Conversation history with `ClaudeSDKClient` |
 
 ### Basic agent
 
@@ -51,4 +52,18 @@ Custom tools work differently from the OpenAI Agents SDK's `@function_tool`:
 
 ```bash
 uv run --env-file .env 21-claude-agents-sdk-bedrock/claude-agent-tools.py
+```
+
+### Conversation history
+
+`claude-agent-conversation.py` is the Claude version of `openai-agent-conversation.py`. You tell a travel planner about a relaxed, nature-focused trip to Tokyo, then ask "What should I do on my first morning?" twice, with the same `ask(client, prompt)` helper. On `client_no_conversation`, which has only seen that question, the planner has to ask where you're going; on `client_with_conversation`, which was also asked turn 1, it gives a tailored suggestion. The script prints the session ID of each turn, so you can see which ones share a session.
+
+With the OpenAI Agents SDK you keep the history yourself and pass it back with `to_input_list()`. Here you pass neither history nor a session ID:
+
+- Each `ClaudeSDKClient` runs its own Claude Code CLI process, and that process remembers everything said on it. The client *is* the session: ask the same client again to continue, or use a new client to start fresh. (A one-off `query()` call also starts fresh.)
+- Each turn is `client.query(...)` followed by reading the reply from `client.receive_response()`.
+- The CLI saves each session as a transcript under `~/.claude/projects/`, and `get_session_messages(session_id)` reads it back, which the script uses to print both sessions' history.
+
+```bash
+uv run --env-file .env 21-claude-agents-sdk-bedrock/claude-agent-conversation.py
 ```
