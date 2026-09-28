@@ -23,7 +23,9 @@ The same examples in the OpenAI Agents SDK, the Claude Agent SDK and the Strands
 ```python
 set_tracing_disabled(True)
 set_default_openai_client(
-    AsyncOpenAI(provider=bedrock(region=region))
+    AsyncOpenAI(
+        provider=bedrock(region=region)
+    )
 )
 ```
 
@@ -43,7 +45,8 @@ env={
 model = BedrockModel(
     model_id=model_id,
     boto_session=boto3.Session(
-        profile_name=profile, region_name=region
+        profile_name=profile,
+        region_name=region,
     ),
 )
 ```
@@ -60,7 +63,7 @@ model = BedrockModel(
 ```python
 agent = Agent(
     name="Agent Tutor",
-    instructions="You explain AI agent concepts...",
+    instructions="You explain ...",
     model=model_id,
 )
 ```
@@ -70,7 +73,7 @@ agent = Agent(
 ```python
 options = ClaudeAgentOptions(
     model=model_id,
-    system_prompt="You explain AI agent concepts...",
+    system_prompt="You explain ...",
     tools=[],
     max_turns=1,
     setting_sources=[],
@@ -83,7 +86,7 @@ options = ClaudeAgentOptions(
 ```python
 agent = Agent(
     model=model,
-    system_prompt="You explain AI agent concepts...",
+    system_prompt="You explain ...",
     callback_handler=None,
 )
 ```
@@ -104,7 +107,9 @@ result = await Runner.run(agent, prompt)
 </td><td>
 
 ```python
-async for message in query(prompt=prompt, options=options):
+async for message in query(
+    prompt=prompt, options=options
+):
     ...
 ```
 
@@ -184,7 +189,9 @@ result.metrics.accumulated_usage
 <tr><td>
 
 ```python
-result = Runner.run_streamed(agent, input=prompt)
+result = Runner.run_streamed(
+    agent, input=prompt
+)
 ```
 
 </td><td>
@@ -210,21 +217,29 @@ not yet
 <tr><td>
 
 ```python
-async for event in result.stream_events():
-    if (event.type == "raw_response_event"
-            and isinstance(event.data, ResponseTextDeltaEvent)):
-        print(event.data.delta, end="")
+events = result.stream_events()
+async for event in events:
+    data = event.data
+    if (
+        event.type == "raw_response_event"
+        and isinstance(
+            data, ResponseTextDeltaEvent
+        )
+    ):
+        print(data.delta, end="")
 ```
 
 </td><td>
 
 ```python
-async for message in query(prompt=prompt, options=options):
+async for message in query(
+    prompt=prompt, options=options
+):
     if isinstance(message, StreamEvent):
-        event = message.event
-        if (event.get("type") == "content_block_delta"
-                and event["delta"].get("type") == "text_delta"):
-            print(event["delta"]["text"], end="")
+        e = message.event
+        d = e.get("delta", {})
+        if d.get("type") == "text_delta":
+            print(d["text"], end="")
 ```
 
 </td><td>
@@ -253,11 +268,11 @@ def calculate_loan_payment(
     annual_rate_percent: float,
     years: int,
 ) -> str:
-    """Calculate the monthly payment and total
-    interest for a fixed-rate loan.
+    """Calculate the monthly payment
+    and total interest for a loan.
 
     Args:
-        principal: Amount borrowed, e.g. 30000.
+        principal: Amount borrowed.
         ...
     """
 ```
@@ -267,10 +282,12 @@ def calculate_loan_payment(
 ```python
 @tool(
     "calculate_loan_payment",
-    "Calculate the monthly payment and total "
-    "interest for a fixed-rate loan.",
+    "Calculate the monthly payment "
+    "and total interest for a loan.",
     {
-        "principal": Annotated[float, "Amount borrowed, e.g. 30000."],
+        "principal": Annotated[
+            float, "Amount borrowed."
+        ],
         ...
     },
 )
@@ -291,15 +308,16 @@ not yet
 <tr><td>
 
 ```python
-return f"Monthly payment ${payment:,.2f} ..."
+return f"Monthly payment ${payment}"
 ```
 
 </td><td>
 
 ```python
-return {"content": [
-    {"type": "text", "text": f"Monthly payment ${payment:,.2f} ..."}
-]}
+return {"content": [{
+    "type": "text",
+    "text": f"Monthly payment ${payment}",
+}]}
 ```
 
 </td><td>
@@ -318,7 +336,10 @@ not yet
 ```python
 agent = Agent(
     ...,
-    tools=[calculate_loan_payment, months_to_savings_goal],
+    tools=[
+        calculate_loan_payment,
+        months_to_savings_goal,
+    ],
 )
 ```
 
@@ -327,9 +348,15 @@ agent = Agent(
 ```python
 options = ClaudeAgentOptions(
     ...,
-    mcp_servers={"finance": create_sdk_mcp_server(
-        name="finance", tools=tools)},
-    allowed_tools=[f"mcp__finance__{t.name}" for t in tools],
+    mcp_servers={
+        "finance": create_sdk_mcp_server(
+            name="finance", tools=tools
+        )
+    },
+    allowed_tools=[
+        f"mcp__finance__{t.name}"
+        for t in tools
+    ],
     max_turns=5,
 )
 ```
@@ -349,10 +376,11 @@ not yet
 
 ```python
 for item in result.new_items:
+    raw = item.raw_item
     if item.type == "tool_call_item":
-        item.raw_item.name, item.raw_item.arguments
+        raw.name, raw.arguments
     elif item.type == "tool_call_output_item":
-        item.raw_item["call_id"], item.output
+        raw["call_id"], item.output
 ```
 
 </td><td>
