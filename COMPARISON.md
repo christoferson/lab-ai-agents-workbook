@@ -95,7 +95,7 @@ agent = Agent(
 
 <tr><td colspan="3">
 
-**Run it.** OpenAI awaits a single result. Claude streams back messages from a Claude Code CLI subprocess. Strands calls the agent like a function, synchronously.
+**Run it.** OpenAI awaits a single result. Strands calls the agent like a function, synchronously. Claude's `query()` only streams back messages from a Claude Code CLI subprocess and has no call that collects them, so a list comprehension reads them all. The last one is always a `ResultMessage` that sums up the run.
 
 </td></tr>
 <tr><td>
@@ -107,10 +107,13 @@ result = await Runner.run(agent, prompt)
 </td><td>
 
 ```python
-async for message in query(
-    prompt=prompt, options=options
-):
-    ...
+messages = [
+    message async for message in query(
+        prompt=prompt,
+        options=options,
+    )
+]
+result = messages[-1]  # ResultMessage
 ```
 
 </td><td>
@@ -123,7 +126,7 @@ result = agent(prompt)
 
 <tr><td colspan="3">
 
-**Get the answer.** Claude's final answer is on the last message of the stream.
+**Get the answer.** Each SDK puts the final text on its result object.
 
 </td></tr>
 <tr><td>
@@ -135,8 +138,7 @@ result.final_output
 </td><td>
 
 ```python
-if isinstance(message, ResultMessage):
-    message.result
+result.result
 ```
 
 </td><td>
@@ -161,9 +163,9 @@ result.context_wrapper.usage
 </td><td>
 
 ```python
-message.num_turns
-message.duration_ms
-message.total_cost_usd
+result.num_turns
+result.duration_ms
+result.total_cost_usd
 ```
 
 </td><td>
@@ -233,7 +235,8 @@ async for event in events:
 
 ```python
 async for message in query(
-    prompt=prompt, options=options
+    prompt=prompt,
+    options=options,
 ):
     if isinstance(message, StreamEvent):
         e = message.event
@@ -386,14 +389,15 @@ for item in result.new_items:
 </td><td>
 
 ```python
-if isinstance(message, AssistantMessage):
-    for b in message.content:
-        if isinstance(b, ToolUseBlock):
-            b.name, b.input
-elif isinstance(message, UserMessage):
-    for b in message.content:
-        if isinstance(b, ToolResultBlock):
-            b.tool_use_id, b.content
+for msg in messages:
+    if isinstance(msg, AssistantMessage):
+        for b in msg.content:
+            if isinstance(b, ToolUseBlock):
+                b.name, b.input
+    elif isinstance(msg, UserMessage):
+        for b in msg.content:
+            if isinstance(b, ToolResultBlock):
+                b.tool_use_id, b.content
 ```
 
 </td><td>
