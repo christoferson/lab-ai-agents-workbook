@@ -26,6 +26,7 @@ Run all commands below from the repo root.
 | `claude-agent-workflow.py` | Multi-agent workflow orchestrated by code |
 | `claude-agent-agents-as-tools.py` | Orchestration by an LLM, with subagents as tools |
 | `claude-agent-handoffs.py` | Handing the conversation to another agent by resuming its session |
+| `claude-agent-structured-output.py` | Getting a typed object back, with a schema in the prompt or in a tool |
 
 ### Basic agent
 
@@ -134,4 +135,24 @@ A subagent reports back and the caller stays in charge. A handoff is the other t
 
 ```bash
 uv run --env-file .env 21-claude-agents-sdk-bedrock/claude-agent-handoffs.py
+```
+
+### Structured output
+
+`claude-agent-structured-output.py` is the Claude version of `openai-agent-structured-output.py`. An "Itinerary Reviewer" reviews a deliberately overpacked, crowded Tokyo day plan and answers with an `ItineraryReview` object, so the script can read `review.crowd_risk` and `review.nature_score` in plain code to decide whether to approve the plan.
+
+`ClaudeAgentOptions` has no `output_type`, so the script shows the two ways to get there. Both are built from the same Pydantic model:
+
+- **Ask for JSON.** Put `ItineraryReview.model_json_schema()` in the system prompt, then parse the reply with `model_validate_json`. Nothing enforces the format: in a test run the model wrapped its JSON in a code fence after being told not to, so the parser strips a fence if it finds one. A reply that doesn't parse is your problem to handle.
+- **Use a tool as the schema.** `@tool` accepts a full JSON Schema, so `@tool("submit_review", ..., ItineraryReview.model_json_schema())` turns the model into a form the agent has to fill in. The review arrives as the tool call's arguments, which the script reads off the `ToolUseBlock` and passes to `model_validate`.
+
+The second way is the sturdier one. `create_sdk_mcp_server` checks each call against the schema with `jsonschema` before your handler runs, and a mismatch goes back to the agent as an error it can correct, so malformed output never reaches your code. The script takes the last `submit_review` call for that reason.
+
+```bash
+uv run --env-file .env 21-claude-agents-sdk-bedrock/claude-agent-structured-output.py
+
+# have a planner agent write a fresh itinerary to review instead of the built-in bad sample
+uv run --env-file .env 21-claude-agents-sdk-bedrock/claude-agent-structured-output.py --planner chaotic     # overpacked and crowded
+uv run --env-file .env 21-claude-agents-sdk-bedrock/claude-agent-structured-output.py --planner thoughtful  # relaxed and nature-focused
+uv run --env-file .env 21-claude-agents-sdk-bedrock/claude-agent-structured-output.py --planner offbeat     # lesser-known spots off the beaten path
 ```

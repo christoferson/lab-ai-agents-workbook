@@ -34,6 +34,7 @@ There is no test suite, linter, or build step configured.
 - Model IDs are Bedrock inference profile IDs, read from `BEDROCK_CLAUDE_MODEL_ID` (defaults to `global.anthropic.claude-sonnet-5`).
 - `tools=[]` disables Claude Code's built-in tools (file access, shell, and so on). Enabling them lets the agent act on the machine it runs on.
 - Subagents: pass `agents={name: AgentDefinition(...)}`, enable the built-in tool with `tools=["Agent"]` plus `allowed_tools`, and set `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` in `options.env`. Without that setting, subagents run in the background, and the caller may move on without their results.
+- There is no `output_type`. For structured output either put a JSON schema in the system prompt and parse the reply, or pass `SomeModel.model_json_schema()` as a `@tool` input schema and read the object off the tool call's arguments. `create_sdk_mcp_server` validates each call with `jsonschema` before the handler runs, so the second way can't yield a malformed object.
 - There is no handoff primitive. `claude-agent-handoffs.py` builds one from a session: the first agent calls a tool that ends its run, then the code runs the next agent with `resume=<session id>` and its own `system_prompt` / `tools`. Resuming carries the history, not the agent, and both runs share one session ID.
 
 ## Strands Agents SDK pattern
