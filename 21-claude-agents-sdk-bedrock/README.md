@@ -24,6 +24,7 @@ Run all commands below from the repo root.
 | `claude-agent-conversation.py` | Conversation history with `ClaudeSDKClient` |
 | `claude-agent-session.py` | Saved sessions: a fixed `session_id`, then `resume` from a new client |
 | `claude-agent-workflow.py` | Multi-agent workflow orchestrated by code |
+| `claude-agent-agents-as-tools.py` | Orchestration by an LLM, with subagents as tools |
 
 ### Basic agent
 
@@ -99,4 +100,21 @@ The Claude Agent SDK has no `Agent` class or `Runner`, so the script builds them
 
 ```bash
 uv run --env-file .env 21-claude-agents-sdk-bedrock/claude-agent-workflow.py
+```
+
+### Agents as tools (subagents)
+
+`claude-agent-agents-as-tools.py` is the Claude version of `openai-agent-agents-as-tools.py`. An LLM does the orchestration instead of your code. A "Trip Director" agent calls the same three planners, compares their drafts and saves the winner with `save_itinerary`. The script prints each call it made.
+
+The OpenAI Agents SDK wraps each agent with `agent.as_tool(...)`. The Claude Agent SDK uses subagents instead:
+
+- `agents={name: AgentDefinition(description=..., prompt=...)}` defines the subagents. The `description` tells the director when to use one, and the `prompt` is the subagent's own system prompt. `tools=[]` gives the planners no tools, and `model="inherit"` runs them on the director's model.
+- The director calls a subagent through Claude Code's built-in `Agent` tool, naming it in `subagent_type`. So `tools=["Agent"]` enables that one built-in tool, and `allowed_tools` pre-approves it along with `save_itinerary`.
+- Each subagent starts with a fresh context and sees only the prompt the director writes for it. The description asks the director to pass only the traveler's request. Without that, the director added its own format instructions and the planners ignored their one-line format.
+- Subagents run in the background by default, and the director only sometimes waits for them. In one test run it moved on without the drafts. `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` in `options.env` makes every `Agent` call wait and return the subagent's report as its result.
+- Messages from inside a subagent carry a `parent_tool_use_id`, so the script skips them and prints only the director's own calls. The CLI wraps each report in a notice and a footer meant for the model, which the script strips.
+- `ResultMessage.total_cost_usd` includes the subagents. `delete_session(...)` also removes their transcripts.
+
+```bash
+uv run --env-file .env 21-claude-agents-sdk-bedrock/claude-agent-agents-as-tools.py
 ```
