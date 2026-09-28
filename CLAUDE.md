@@ -41,4 +41,8 @@ There is no test suite, linter, or build step configured.
 - `Agent(model=BedrockModel(model_id=..., boto_session=boto3.Session(profile_name=..., region_name=...)), system_prompt=...)`. Calling `agent(prompt)` is synchronous and returns an `AgentResult`, and `str(result)` gives the final text.
 - Always pass `model=` explicitly. A bare `Agent()` falls back to a default Bedrock model.
 - Pass `callback_handler=None` unless you want the default handler to print the response as it streams.
-- Model IDs come from `BEDROCK_CLAUDE_MODEL_ID` (defaults to `global.anthropic.claude-sonnet-5`), shared with the Claude examples.
+- `STRANDS_MODEL_PROVIDER` selects `anthropic` (default), `openai` or `amazon`. All three use `BedrockModel` (the Converse API).
+  - `anthropic` reads its model ID from `STRANDS_MODEL_ID_ANTHROPIC`, which defaults to `global.anthropic.claude-sonnet-5`.
+  - `openai` reads `STRANDS_MODEL_ID_OPENAI`, which defaults to gpt-oss `openai.gpt-oss-120b-1:0`.
+  - `amazon` reads `STRANDS_MODEL_ID_AMAZON`, which defaults to Nova 2 Lite `global.amazon.nova-2-lite-v1:0`.
+- Converse rejects `openai.gpt-5.6-luna`, so don't reuse `BEDROCK_MODEL_ID` here.

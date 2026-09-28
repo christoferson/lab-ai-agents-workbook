@@ -33,8 +33,16 @@ AWS_PROFILE=your-profile
 AWS_REGION=us-east-1
 # Optional: model for the OpenAI Agents SDK examples, defaults to openai.gpt-5.6-luna
 BEDROCK_MODEL_ID=openai.gpt-5.6-luna
-# Optional: model for the Claude Agent SDK and Strands examples, defaults to global.anthropic.claude-sonnet-5
+# Optional: model for the Claude Agent SDK examples, defaults to global.anthropic.claude-sonnet-5
 BEDROCK_CLAUDE_MODEL_ID=global.anthropic.claude-sonnet-5
+# Optional: model family for the Strands examples, anthropic (default), openai or amazon
+STRANDS_MODEL_PROVIDER=anthropic
+# Optional: model for the Strands examples with anthropic, defaults to global.anthropic.claude-sonnet-5
+STRANDS_MODEL_ID_ANTHROPIC=global.anthropic.claude-sonnet-5
+# Optional: model for the Strands examples with openai, defaults to openai.gpt-oss-120b-1:0
+STRANDS_MODEL_ID_OPENAI=openai.gpt-oss-120b-1:0
+# Optional: model for the Strands examples with amazon, defaults to global.amazon.nova-2-lite-v1:0
+STRANDS_MODEL_ID_AMAZON=global.amazon.nova-2-lite-v1:0
 ```
 
 Alternatively, export them in your shell:

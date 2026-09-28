@@ -7,9 +7,37 @@ Examples of the [Strands Agents SDK](https://strandsagents.com/) (`strands-agent
 Strands is AWS's own agent SDK, and Bedrock is its default provider:
 
 - An `Agent` is a model plus a system prompt. Calling the agent, `agent(prompt)`, runs its loop and returns an `AgentResult`. The call is synchronous, so there's no `asyncio` in the basic example.
-- `BedrockModel(model_id=..., boto_session=...)` calls Bedrock directly through boto3. It needs no subprocess (as in the Claude Agent SDK) and no client to register (as in the OpenAI Agents SDK). The script builds the boto3 session from `AWS_PROFILE` / `AWS_REGION`.
+- Strands calls Bedrock directly. It needs no subprocess (as in the Claude Agent SDK) and no client to register (as in the OpenAI Agents SDK). The script builds a boto3 session from `AWS_PROFILE` / `AWS_REGION` and gives it to the model.
 - A bare `Agent()` with no model also uses Bedrock, but with a default model and whatever AWS credentials boto3 finds, so the examples always pass `model=` explicitly.
-- The model is a Bedrock inference profile ID, read from `BEDROCK_CLAUDE_MODEL_ID` (defaults to `global.anthropic.claude-sonnet-5`), the same variable the Claude Agent SDK examples use.
+
+## Choosing the model: Claude, gpt-oss or Nova
+
+`STRANDS_MODEL_PROVIDER` picks the model family, and a separate variable holds each family's model ID:
+
+| `STRANDS_MODEL_PROVIDER` | Model ID variable (default) |
+| --- | --- |
+| `anthropic` (default) | `STRANDS_MODEL_ID_ANTHROPIC` (`global.anthropic.claude-sonnet-5`) |
+| `openai` | `STRANDS_MODEL_ID_OPENAI` (`openai.gpt-oss-120b-1:0`) |
+| `amazon` | `STRANDS_MODEL_ID_AMAZON` (`global.amazon.nova-2-lite-v1:0`) |
+
+The `openai` option uses OpenAI's open-weight [gpt-oss models](https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-openai.html) (`openai.gpt-oss-120b-1:0` or `openai.gpt-oss-20b-1:0`). The `amazon` option uses Amazon's own [Nova 2 Lite](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-amazon-nova-2-lite.html), called through its `global.` inference profile. In `us-east-1`, the plain `amazon.nova-2-lite-v1:0` isn't available In-Region.
+
+All three run on Bedrock's Converse API, so the same `BedrockModel` class works for each, and only the model ID changes. gpt-oss also returns its reasoning, but `str(result)` includes only the answer text.
+
+The OpenAI examples' `openai.gpt-5.6-luna` (`BEDROCK_MODEL_ID`) doesn't work here: the Converse API rejects it ("on-demand throughput isn't supported").
+
+```bash
+# Claude (default)
+uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent.py
+
+# gpt-oss
+STRANDS_MODEL_PROVIDER=openai uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent.py
+
+# Nova
+STRANDS_MODEL_PROVIDER=amazon uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent.py
+```
+
+You can also set `STRANDS_MODEL_PROVIDER` in `.env`.
 - By default, the agent prints the response as it streams in. `callback_handler=None` turns that off, so the script prints the result itself.
 
 Run all commands below from the repo root.
@@ -22,7 +50,7 @@ Run all commands below from the repo root.
 
 ### Basic agent
 
-`strands-agent.py` asks Claude on Bedrock a single question. It prints the answer and a run summary: stop reason, cycles, duration and token usage. Strands reports tokens rather than cost.
+`strands-agent.py` asks the chosen model a single question. It prints the answer and a run summary: stop reason, cycles, duration and token usage. Strands reports tokens rather than cost.
 
 ```bash
 uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent.py
