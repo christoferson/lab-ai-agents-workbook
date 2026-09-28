@@ -71,7 +71,7 @@ export UV_ENV_FILE=.env
 uv run 11-openai-agents-sdk-bedrock/openai-agent.py
 ```
 
-See each folder's README for its scripts and what they demonstrate.
+See each folder's README for its scripts and what they demonstrate. [`COMPARISON.md`](COMPARISON.md) compares the same examples across the three SDKs, showing only the code that differs.
 
 ## Adding dependencies
 
