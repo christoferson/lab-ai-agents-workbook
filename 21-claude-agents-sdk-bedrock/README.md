@@ -25,6 +25,7 @@ Run all commands below from the repo root.
 | `claude-agent-session.py` | Saved sessions: a fixed `session_id`, then `resume` from a new client |
 | `claude-agent-workflow.py` | Multi-agent workflow orchestrated by code |
 | `claude-agent-agents-as-tools.py` | Orchestration by an LLM, with subagents as tools |
+| `claude-agent-handoffs.py` | Handing the conversation to another agent by resuming its session |
 
 ### Basic agent
 
@@ -117,4 +118,20 @@ The OpenAI Agents SDK wraps each agent with `agent.as_tool(...)`. The Claude Age
 
 ```bash
 uv run --env-file .env 21-claude-agents-sdk-bedrock/claude-agent-agents-as-tools.py
+```
+
+### Handoffs
+
+`claude-agent-handoffs.py` is the Claude version of `openai-agent-handoffs.py`. The Trip Director still drafts with its three planner subagents, but it no longer saves the winner: it hands the conversation to a Publisher agent, which saves the plan and writes the final reply. The script labels each step with the agent in control.
+
+A subagent reports back and the caller stays in charge. A handoff is the other thing: the next agent takes the conversation over. The OpenAI Agents SDK has `handoffs=[publisher]` for this; the Claude Agent SDK has no handoff, so the example builds one out of sessions:
+
+- `transfer_to_publisher` is an MCP tool that does no work. Calling it *is* the handoff request, and it ends the director's run. Its one argument is a note on which planner won and why, which the script prints.
+- A session is the conversation, so the code then runs the publisher with `resume=<the director's session id>` (see the sessions example). The publisher inherits the drafts and the director's choice, which is why it can summarize the winning plan without being told it.
+- Resuming takes the *history*, not the agent: the publisher run passes its own `system_prompt`, its own `tools` and no subagents. Both runs append to the same session, so there is one transcript to delete at the end.
+- `query()` always needs a prompt, so the handoff message is the prompt. Everything the publisher needs is in its instructions and the conversation it just inherited.
+- The director's final answer is not the run's answer. The publisher's reply is, exactly as with a handoff in the OpenAI SDK.
+
+```bash
+uv run --env-file .env 21-claude-agents-sdk-bedrock/claude-agent-handoffs.py
 ```
