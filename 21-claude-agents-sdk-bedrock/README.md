@@ -27,6 +27,7 @@ Run all commands below from the repo root.
 | `claude-agent-agents-as-tools.py` | Orchestration by an LLM, with subagents as tools |
 | `claude-agent-handoffs.py` | Handing the conversation to another agent by resuming its session |
 | `claude-agent-structured-output.py` | Getting a typed object back, with a schema in the prompt or in a tool |
+| `claude-agent-guardrails.py` | Hooks that block a bad request and send a bad plan back for revision |
 
 ### Basic agent
 
@@ -155,4 +156,27 @@ uv run --env-file .env 21-claude-agents-sdk-bedrock/claude-agent-structured-outp
 uv run --env-file .env 21-claude-agents-sdk-bedrock/claude-agent-structured-output.py --planner chaotic     # overpacked and crowded
 uv run --env-file .env 21-claude-agents-sdk-bedrock/claude-agent-structured-output.py --planner thoughtful  # relaxed and nature-focused
 uv run --env-file .env 21-claude-agents-sdk-bedrock/claude-agent-structured-output.py --planner offbeat     # lesser-known spots off the beaten path
+```
+
+### Guardrails
+
+`claude-agent-guardrails.py` is the Claude version of `openai-agent-guardrails.py`. Three planners (thoughtful, offbeat, chaotic) answer the same request behind the same two guardrails: one that rejects requests that aren't about Tokyo travel, and one that refuses to deliver a plan that is unrealistic, crowded, or barely about nature.
+
+The OpenAI Agents SDK has `input_guardrails` and `output_guardrails`, and a tripwire raises an exception. The Claude Agent SDK has **hooks**: callbacks the CLI runs at fixed points in the agent loop, which can block what happens next. Each guardrail here is one hook, and each hook runs a checker agent that answers through a tool schema, as in the structured output example.
+
+- **Input guardrail — a `UserPromptSubmit` hook.** It runs a Topic Checker on the prompt and returns `{"decision": "block", "reason": ...}` for anything off topic. The prompt is then thrown away: the planner run comes back with `num_turns` of 0, so an off-topic request costs one small check instead of a plan.
+- **Output guardrail — a `PreToolUse` hook.** Hooks see tool calls, not the final reply, so the planner delivers by calling `submit_plan` and `HookMatcher(matcher="mcp__guarded__submit_plan", ...)` guards that call. The hook runs an Itinerary Reviewer on the plan and answers with `permissionDecision` of `"allow"` or `"deny"`.
+- **A denial is feedback, not just a stop.** `permissionDecisionReason` goes back to the planner as the tool's result, so it can fix the plan and submit again — something an OpenAI tripwire can't do. In a test run the Thoughtful Planner's first plan was denied for putting Shinjuku Gyoen and Yoyogi Park at cherry blossom time; it came back with the National Institute for Nature Study and Todoroki Valley, which passed.
+- **The second failure ends it.** The guardrail then returns `{"continue_": False, "stopReason": ...}`, which stops the whole run. The Chaotic Planner reliably gets that far, and nothing is delivered. Note that the run still reports `is_error=False` with empty text, so the script tracks the block in the guardrail object rather than reading it off `ResultMessage`.
+- Both guardrails are plain dataclasses whose `hook` method is the callback, so each one keeps the decisions it made for the script to print afterwards. Hook timeouts default to 60s, and these hooks run a whole agent, so `HookMatcher(timeout=180)` gives them room.
+
+```bash
+uv run --env-file .env 21-claude-agents-sdk-bedrock/claude-agent-guardrails.py
+
+# one planner at a time
+uv run --env-file .env 21-claude-agents-sdk-bedrock/claude-agent-guardrails.py --planner thoughtful  # passes, usually after one revision
+uv run --env-file .env 21-claude-agents-sdk-bedrock/claude-agent-guardrails.py --planner chaotic     # denied twice, run stopped
+
+# trip the input guardrail instead
+uv run --env-file .env 21-claude-agents-sdk-bedrock/claude-agent-guardrails.py --planner thoughtful --request "Write me a Python script to rename files in a folder."
 ```
