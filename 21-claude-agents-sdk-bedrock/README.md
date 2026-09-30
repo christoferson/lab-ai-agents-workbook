@@ -28,6 +28,7 @@ Run all commands below from the repo root.
 | `claude-agent-handoffs.py` | Handing the conversation to another agent by resuming its session |
 | `claude-agent-structured-output.py` | Getting a typed object back, with a schema in the prompt or in a tool |
 | `claude-agent-guardrails.py` | Hooks that block a bad request and send a bad plan back for revision |
+| `claude-agent-deep-research.py` | Multi-agent web research with a fact-check loop, using Bedrock web search |
 
 ### Basic agent
 
@@ -179,4 +180,31 @@ uv run --env-file .env 21-claude-agents-sdk-bedrock/claude-agent-guardrails.py -
 
 # trip the input guardrail instead
 uv run --env-file .env 21-claude-agents-sdk-bedrock/claude-agent-guardrails.py --planner thoughtful --request "Write me a Python script to rename files in a folder."
+```
+
+### Deep research
+
+`claude-agent-deep-research.py` is the Claude version of `openai-agent-deep-research.py`, with the same pipeline, run by plain Python code:
+
+1. A Planner turns the query into 3 searches.
+2. Searchers run them in parallel.
+3. A Writer turns the summaries into a report.
+4. A Fact Checker verifies the report, and the Writer revises it until the check passes (up to 3 rounds).
+5. A Publisher saves the report to `reports/claude/`, which is git-ignored.
+
+Every agent gets today's date, so "this autumn" means the right year.
+
+What differs from the OpenAI version:
+
+- **Web search is a custom tool.** Claude Code's built-in `WebSearch` isn't available on Bedrock. In a test, the agent was never offered it and answered from memory. So `web_search` is an MCP tool that calls Bedrock's own web search, the one the OpenAI example uses: a Responses API request with `tools=[{"type": "web_search", ...}]` and `tool_choice="required"`. The search model is read from `BEDROCK_MODEL_ID` (the OpenAI folder's model). It returns a summary and its `url_citation` sources, and the tool passes both to the Claude agent. `external_web_access=False` keeps retrieval inside AWS.
+- **`WebFetch` does work on Bedrock.** It fetches the page from your machine. The Fact Checker gets it with `tools=["WebFetch"]` so it can read a source page. It's the only built-in tool enabled here, and it can't touch local files or the shell.
+- **Structured output uses tool schemas**, as in the structured output example. `submit_search_plan`, `submit_report` and `submit_fact_check` take `SearchPlan`, `ReportData` and `FactCheck` as their input schemas. `ask_for(...)` reads the typed object from the last submit call.
+- **There are two bills.** `total_cost_usd` covers the Claude runs only. Web searches are billed to the search model, so the script counts them and their tokens separately. In one test run, 9 Claude runs cost $0.35, and 11 web searches used about 165k input tokens.
+- The fact check earns its place. In that run, a search summary listed "Junsaiike Pond Park (Meguro)". The Fact Checker searched for it, found that Junsaiike is in Niigata, and had the Writer replace it with Shimizuike Park in Meguro. It also corrected a wrong peak date for Mt. Takao, then passed the revision in round 2.
+
+```bash
+uv run --env-file .env 21-claude-agents-sdk-bedrock/claude-agent-deep-research.py
+
+# research a different question
+uv run --env-file .env 21-claude-agents-sdk-bedrock/claude-agent-deep-research.py --query "Quiet onsen towns within two hours of Tokyo for a winter weekend"
 ```
