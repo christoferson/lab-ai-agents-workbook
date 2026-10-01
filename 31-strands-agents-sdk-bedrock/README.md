@@ -47,6 +47,7 @@ Run all commands below from the repo root.
 | Script | Shows |
 | --- | --- |
 | `strands-agent.py` | A single question and a run summary |
+| `strands-agent-streaming.py` | Streaming the response as it is generated |
 
 ### Basic agent
 
@@ -54,4 +55,19 @@ Run all commands below from the repo root.
 
 ```bash
 uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent.py
+```
+
+### Streaming
+
+`strands-agent-streaming.py` prints the answer as it is generated, like the streaming examples in the OpenAI and Claude folders. It uses the same model and agent as the basic example. Only the call changes:
+
+- `agent.stream_async(prompt)` is an async iterator of plain dicts instead of a single `AgentResult`. A text chunk has a `"data"` key, and the last event has a `"result"` key with the same `AgentResult` that `agent(prompt)` returns, so the run summary works as before.
+- Nothing has to be turned on. `BedrockModel` always calls Bedrock's streaming API (ConverseStream); `agent(prompt)` just waits for the end. That is also why `callback_handler=None` matters here: the default handler prints every `"data"` chunk itself, so without it each chunk would print twice.
+- Other keys carry the rest of the stream. `"event"` holds the raw Bedrock stream events, and gpt-oss's reasoning arrives separately as `"reasoningText"`, so printing only `"data"` shows just the answer.
+- The run summary adds the time to the first chunk, which is what streaming improves: in a test the full answer took 6.0s on Sonnet, but the first text appeared after 3.7s.
+
+```bash
+uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-streaming.py
+STRANDS_MODEL_PROVIDER=openai uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-streaming.py
+STRANDS_MODEL_PROVIDER=amazon uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-streaming.py
 ```
