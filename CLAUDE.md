@@ -51,3 +51,4 @@ There is no test suite, linter, or build step configured.
   - `openai` reads `STRANDS_MODEL_ID_OPENAI`, which defaults to gpt-oss `openai.gpt-oss-120b-1:0`.
   - `amazon` reads `STRANDS_MODEL_ID_AMAZON`, which defaults to Nova 2 Lite `global.amazon.nova-2-lite-v1:0`.
 - Converse rejects `openai.gpt-5.6-luna`, so don't reuse `BEDROCK_MODEL_ID` here.
+- Tools: decorate a plain function with `@tool` (`from strands import tool`) and pass it as `Agent(tools=[...])`. The schema comes from the type hints and the docstring (first line plus `Args:`), and `tool_spec` shows it. A tool returns a plain value. Tool calls and results are `toolUse` / `toolResult` blocks in `agent.messages`, matched by `toolUseId`.

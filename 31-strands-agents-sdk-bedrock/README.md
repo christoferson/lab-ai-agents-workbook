@@ -48,6 +48,7 @@ Run all commands below from the repo root.
 | --- | --- |
 | `strands-agent.py` | A single question and a run summary |
 | `strands-agent-streaming.py` | Streaming the response as it is generated |
+| `strands-agent-tools.py` | Custom Python tools, defined with `@tool` |
 
 ### Basic agent
 
@@ -70,4 +71,24 @@ uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent.py
 uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-streaming.py
 STRANDS_MODEL_PROVIDER=openai uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-streaming.py
 STRANDS_MODEL_PROVIDER=amazon uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-streaming.py
+```
+
+### Tools
+
+`strands-agent-tools.py` is the Strands version of `openai-agent-tools.py` and `claude-agent-tools.py`. A "Finance Assistant" compares buying a car with a loan against saving up for it. It uses a loan payment calculator and a savings goal calculator instead of doing the math itself. The script prints each tool call and its result before the answer.
+
+Of the three SDKs, Strands needs the least code for tools:
+
+- `@tool` reads everything from the function. The name comes from the function name, and the types come from the type hints. The docstring's first line becomes the description, and its `Args:` section describes each parameter. The script prints `tool_spec`, the JSON schema that Strands sends to the model.
+- A tool returns a plain value, here a string. It doesn't need MCP-style content blocks as in the Claude Agent SDK. The decorated function also stays callable as ordinary Python.
+- `Agent(tools=[...])` takes the functions directly. There is no MCP server and no `allowed_tools` list, and Strands runs a tool in this process whenever the model asks for one.
+- To see the calls, read `agent.messages`, the conversation in Converse format. A call is a `toolUse` block in an assistant message, and its result is a `toolResult` block in the next user message, matched by `toolUseId`.
+- `Cycles` in the run summary counts model calls. A round of tool calls adds one. In test runs, Sonnet and Nova asked for both tools at once (2 cycles), and gpt-oss called them one at a time (3 cycles).
+
+The tools fix the arithmetic, not the reasoning. All three models got the same numbers from the tools, but their conclusions varied. In one test, gpt-oss said saving meant waiting "~7 months longer", and Nova said the loan costs less overall.
+
+```bash
+uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-tools.py
+STRANDS_MODEL_PROVIDER=openai uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-tools.py
+STRANDS_MODEL_PROVIDER=amazon uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-tools.py
 ```
