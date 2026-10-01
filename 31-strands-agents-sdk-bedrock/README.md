@@ -49,6 +49,7 @@ Run all commands below from the repo root.
 | `strands-agent.py` | A single question and a run summary |
 | `strands-agent-streaming.py` | Streaming the response as it is generated |
 | `strands-agent-tools.py` | Custom Python tools, defined with `@tool` |
+| `strands-agent-conversation.py` | Conversation history kept by the `Agent` object |
 
 ### Basic agent
 
@@ -91,4 +92,24 @@ The tools fix the arithmetic, not the reasoning. All three models got the same n
 uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-tools.py
 STRANDS_MODEL_PROVIDER=openai uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-tools.py
 STRANDS_MODEL_PROVIDER=amazon uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-tools.py
+```
+
+### Conversation history
+
+`strands-agent-conversation.py` is the Strands version of `openai-agent-conversation.py` and `claude-agent-conversation.py`. You tell a travel planner about a relaxed, nature-focused trip to Tokyo. Then you ask "What should I do on my first morning?" twice, with the same `ask(agent, prompt)` helper:
+
+- `agent_no_conversation` has seen only that question, so the planner asks where you're going.
+- `agent_with_conversation` was also asked turn 1, so it suggests a quiet Tokyo garden.
+
+The three SDKs keep history in three different places. In OpenAI you pass it back yourself with `to_input_list()`, and in Claude the CLI process holds it. In Strands it's the **`Agent` object**:
+
+- Each call appends the prompt and the reply to `agent.messages`, and the next call sends that whole list to the model. To continue a conversation, call the same agent again. To start fresh, make another agent. The script prints how many messages each agent holds before each turn.
+- `agent.messages` is a plain Python list in Converse format (`{"role": ..., "content": [blocks]}`), so you can read it, save it or edit it. There's no transcript file and nothing to delete. The history lives only as long as the object does (the sessions example will persist it).
+- Both agents share one `BedrockModel`. The model holds only the connection settings, not the conversation, so sharing it doesn't mix the histories.
+- gpt-oss's reasoning is stored in the history too, as a `reasoningContent` block next to the text. `print_history` shows only text blocks.
+
+```bash
+uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-conversation.py
+STRANDS_MODEL_PROVIDER=openai uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-conversation.py
+STRANDS_MODEL_PROVIDER=amazon uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-conversation.py
 ```
