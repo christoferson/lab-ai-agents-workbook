@@ -51,6 +51,7 @@ Run all commands below from the repo root.
 | `strands-agent-tools.py` | Custom Python tools, defined with `@tool` |
 | `strands-agent-conversation.py` | Conversation history kept by the `Agent` object |
 | `strands-agent-session.py` | Saved sessions: `FileSessionManager` writes the history to disk, and a new agent reloads it |
+| `strands-agent-workflow.py` | Multi-agent workflow orchestrated by code |
 
 ### Basic agent
 
@@ -133,4 +134,26 @@ In the conversation example, the history lived only in `agent.messages` and was 
 uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-session.py
 STRANDS_MODEL_PROVIDER=openai uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-session.py
 STRANDS_MODEL_PROVIDER=amazon uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-session.py
+```
+
+### Workflow orchestrated by code
+
+`strands-agent-workflow.py` is the Strands version of `openai-agent-workflow.py` and `claude-agent-workflow.py`. Three planner agents (nature, culture, slow travel) draft a Tokyo day plan in parallel. An editor agent picks the best one, and a publisher agent saves it to `itineraries/strands/` (git-ignored) using a `save_itinerary` tool.
+
+It is close to the OpenAI version, because Strands has a real `Agent` class:
+
+- Each agent is an `Agent(name=..., model=..., system_prompt=..., tools=...)`, built by a small `make_agent` factory. All five share one `BedrockModel`, and only the publisher has a tool.
+- `await agent.invoke_async(prompt)` is the awaitable form of `agent(prompt)`, so `asyncio.gather` runs the three planners at the same time. There's no subprocess per agent, as there is in the Claude version.
+- Each agent keeps its own `agent.messages`, so the agents never see each other's conversations. The code passes results along as prompts: the drafts go to the editor, and the editor's pick goes to the publisher.
+- The publisher's tool call is read from `publisher.messages`, as in the tools example.
+- Every agent tracks its own token usage in `agent.event_loop_metrics`, and the script adds them up. Nothing is saved besides the itinerary, so there's nothing to clean up.
+
+Strands also has multi-agent classes in `strands.multiagent`: `GraphBuilder` for a fixed flow of agents and `Swarm` for agents that hand work to each other. This example keeps the flow in plain Python, to match the other two folders.
+
+In test runs, the whole workflow took 40.5s on Sonnet, 22.9s on gpt-oss and 7.3s on Nova. Nova drafted all three plans in 2.8s.
+
+```bash
+uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-workflow.py
+STRANDS_MODEL_PROVIDER=openai uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-workflow.py
+STRANDS_MODEL_PROVIDER=amazon uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-workflow.py
 ```
