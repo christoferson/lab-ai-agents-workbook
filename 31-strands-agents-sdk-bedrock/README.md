@@ -50,6 +50,7 @@ Run all commands below from the repo root.
 | `strands-agent-streaming.py` | Streaming the response as it is generated |
 | `strands-agent-tools.py` | Custom Python tools, defined with `@tool` |
 | `strands-agent-conversation.py` | Conversation history kept by the `Agent` object |
+| `strands-agent-session.py` | Saved sessions: `FileSessionManager` writes the history to disk, and a new agent reloads it |
 
 ### Basic agent
 
@@ -112,4 +113,24 @@ The three SDKs keep history in three different places. In OpenAI you pass it bac
 uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-conversation.py
 STRANDS_MODEL_PROVIDER=openai uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-conversation.py
 STRANDS_MODEL_PROVIDER=amazon uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-conversation.py
+```
+
+### Sessions
+
+`strands-agent-session.py` is the Strands version of `openai-agent-session.py` and `claude-agent-session.py`. It has two turns with a travel planner, then drops the agent and builds a brand-new one from the same session ID, as if the app had restarted. The new agent continues the conversation.
+
+In the conversation example, the history lived only in `agent.messages` and was lost with the object. A **session manager** also saves it:
+
+- `Agent(session_manager=FileSessionManager(session_id=..., storage_dir=...), agent_id=...)` attaches the agent to a session. Each new message is written to disk as it is added, so there's no save call.
+- When an agent is created with a session that already holds messages for its `agent_id`, they are loaded into `agent.messages` at once, before the first call. The script prints the reloaded history before turn 3 to show this.
+- The store is a folder of plain JSON files: `session.json`, `agent.json`, and one `message_<n>.json` per message. The script lists them. It uses `sessions/` next to the script (git-ignored); without `storage_dir` they go to `~/.strands/sessions/`.
+- A session can hold several agents, each under its own `agent_id`, which is why the files are nested under `agents/agent_travel-planner/`.
+- The system prompt is not saved. It comes from the code each time, as in the OpenAI and Claude versions. `agent.json` does save the agent's `state` and its conversation manager's settings.
+- Creating the manager creates the session, so `delete_session(...)` always has something to remove. The script calls it at the start, so every run starts the same way, and at the end to clean up.
+- `S3SessionManager` has the same interface and keeps the files in an S3 bucket instead, for apps that run on more than one machine.
+
+```bash
+uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-session.py
+STRANDS_MODEL_PROVIDER=openai uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-session.py
+STRANDS_MODEL_PROVIDER=amazon uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-session.py
 ```
