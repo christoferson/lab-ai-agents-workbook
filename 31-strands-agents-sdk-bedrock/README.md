@@ -52,6 +52,7 @@ Run all commands below from the repo root.
 | `strands-agent-conversation.py` | Conversation history kept by the `Agent` object |
 | `strands-agent-session.py` | Saved sessions: `FileSessionManager` writes the history to disk, and a new agent reloads it |
 | `strands-agent-workflow.py` | Multi-agent workflow orchestrated by code |
+| `strands-agent-agents-as-tools.py` | Orchestration by an LLM, with agents as tools (`agent.as_tool()`) |
 
 ### Basic agent
 
@@ -156,4 +157,23 @@ In test runs, the whole workflow took 40.5s on Sonnet, 22.9s on gpt-oss and 7.3s
 uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-workflow.py
 STRANDS_MODEL_PROVIDER=openai uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-workflow.py
 STRANDS_MODEL_PROVIDER=amazon uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-workflow.py
+```
+
+### Agents as tools
+
+`strands-agent-agents-as-tools.py` is the Strands version of `openai-agent-agents-as-tools.py` and `claude-agent-agents-as-tools.py`. An LLM does the orchestration instead of your code. A "Trip Director" agent calls the same three planners, compares their drafts and saves the winner with `save_itinerary`. The script prints each call it made.
+
+Strands works like the OpenAI Agents SDK here. The Claude Agent SDK needed subagents and a background-task setting instead:
+
+- `planner.as_tool(name=..., description=...)` wraps an agent as a tool with one string parameter, `input`. Calling the tool runs that agent on the input and returns its reply, and then control goes back to the director. Tool names can't contain spaces, so the script derives `nature_guide` from "Nature Guide". You can also put an `Agent` straight into `tools=[...]`, and Strands calls `as_tool()` for you with the agent's own name.
+- Each call starts the planner from the conversation it had when it was wrapped (`preserve_context=False`, the default), so calling the same planner twice doesn't mix the drafts.
+- The director's tools mix both kinds, and the agent graph shows each one's `tool_type`: `agent` for the planners, `function` for `save_itinerary`.
+- Calls to the planners are ordinary `toolUse` / `toolResult` blocks in `director.messages`, so the steps are read as in the tools example. The planners' own model calls stay in their own agents.
+- When the model asks for several tools at once, Strands runs them concurrently: the default `tool_executor` is `ConcurrentToolExecutor`. In test runs, Sonnet and Nova called all three planners in one cycle (3 cycles in total), while gpt-oss called them one at a time (5 cycles).
+- Each agent counts only its own tokens, so the run summary reports the director and the planners separately.
+
+```bash
+uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-agents-as-tools.py
+STRANDS_MODEL_PROVIDER=openai uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-agents-as-tools.py
+STRANDS_MODEL_PROVIDER=amazon uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-agents-as-tools.py
 ```
