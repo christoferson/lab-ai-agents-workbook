@@ -53,6 +53,7 @@ Run all commands below from the repo root.
 | `strands-agent-session.py` | Saved sessions: `FileSessionManager` writes the history to disk, and a new agent reloads it |
 | `strands-agent-workflow.py` | Multi-agent workflow orchestrated by code |
 | `strands-agent-agents-as-tools.py` | Orchestration by an LLM, with agents as tools (`agent.as_tool()`) |
+| `strands-agent-handoffs.py` | Handing the task to another agent with a `Swarm` |
 
 ### Basic agent
 
@@ -176,4 +177,29 @@ Strands works like the OpenAI Agents SDK here. The Claude Agent SDK needed subag
 uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-agents-as-tools.py
 STRANDS_MODEL_PROVIDER=openai uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-agents-as-tools.py
 STRANDS_MODEL_PROVIDER=amazon uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-agents-as-tools.py
+```
+
+### Handoffs
+
+`strands-agent-handoffs.py` is the Strands version of `openai-agent-handoffs.py` and `claude-agent-handoffs.py`. The Trip Director still drafts with its three planner tools, but it no longer saves the winner. Instead it hands the task to a Publisher agent, which saves the plan and writes the final reply. The script labels each step with the agent in control.
+
+A tool reports back and the caller stays in charge. A handoff is the other thing: the next agent takes over. In Strands that is a **`Swarm`**, a group of agents that pass work to each other:
+
+- `Swarm([director, publisher], entry_point=director)` gives every agent in it a `handoff_to_agent(agent_name, message, context)` tool. Calling it ends that agent's turn, and the swarm starts the named agent next. An agent that finishes without handing off ends the swarm.
+- The agents' names are the swarm's node IDs, and the director passes one as `agent_name`, so they are written like identifiers (`trip_director`, `publisher`). The publisher's `description` is how the other agents learn what it does.
+- **The next agent doesn't inherit the conversation.** This is the big difference from the other two SDKs. An OpenAI handoff passes the whole history, and the Claude example resumes the session. Swarm instead builds the next agent a new prompt: the handoff `message`, the original task, which agents worked on it, any `context` that was passed, and the other agents it could hand off to. The script prints that prompt in full.
+- So the publisher never sees the three drafts. The director's instructions tell it to put the full chosen plan in the handoff message, and in test runs all three models did (gpt-oss sometimes put it in `context` instead). The OpenAI and Claude examples don't need that instruction.
+- The steps are in the director's system prompt, not the task, because Swarm repeats the task in every agent's prompt. When the task held the steps, Nova's publisher read them as its own job and handed back to the director.
+- `result.node_history` lists the agents in the order they had control. `max_handoffs` counts agent turns, not handoffs, and reaching it ends the swarm with status `failed`.
+- Before each of its turns, an agent's `messages` are reset to how they were at the start. So an agent that had control twice shows only its last turn, and the script says so.
+- That reset doesn't clear the agent's token counter. Swarm's `result.accumulated_usage` adds up each agent's running total once per turn, so it overcounts an agent that had control twice. The summary uses each agent's own `event_loop_metrics` instead.
+
+`as_tool(delegate=True)` is a lighter alternative: the sub-agent's reply becomes the caller's final answer, with no extra model call. But it is still a tool call, so the sub-agent gets only its `input` string and the caller's run ends with it.
+
+In test runs, Sonnet took about 36s and Nova 11s. gpt-oss varied from 15s to 160s between identical runs, and the debug logs showed the time was spent waiting for the model's streamed replies.
+
+```bash
+uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-handoffs.py
+STRANDS_MODEL_PROVIDER=openai uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-handoffs.py
+STRANDS_MODEL_PROVIDER=amazon uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-handoffs.py
 ```
