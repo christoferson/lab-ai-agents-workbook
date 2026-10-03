@@ -54,6 +54,7 @@ Run all commands below from the repo root.
 | `strands-agent-workflow.py` | Multi-agent workflow orchestrated by code |
 | `strands-agent-agents-as-tools.py` | Orchestration by an LLM, with agents as tools (`agent.as_tool()`) |
 | `strands-agent-handoffs.py` | Handing the task to another agent with a `Swarm` |
+| `strands-agent-structured-output.py` | A typed Pydantic object as the answer (`structured_output_model`) |
 
 ### Basic agent
 
@@ -202,4 +203,25 @@ In test runs, Sonnet took about 36s and Nova 11s. gpt-oss varied from 15s to 160
 uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-handoffs.py
 STRANDS_MODEL_PROVIDER=openai uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-handoffs.py
 STRANDS_MODEL_PROVIDER=amazon uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-handoffs.py
+```
+
+### Structured output
+
+`strands-agent-structured-output.py` is the Strands version of `openai-agent-structured-output.py` and `claude-agent-structured-output.py`. An "Itinerary Reviewer" grades a deliberately bad Tokyo plan and answers with an `ItineraryReview` Pydantic object instead of text. Plain code then reads its fields to approve the plan or send it back. `--planner chaotic|thoughtful|offbeat` has a planner agent write a fresh plan to review instead.
+
+Strands has this built in, like `output_type` in the OpenAI Agents SDK. The Claude Agent SDK has nothing equivalent, so its example builds two ways by hand:
+
+- `Agent(structured_output_model=ItineraryReview)` sets it for every call, and `agent(prompt, structured_output_model=...)` sets it for one call. `result.structured_output` is the parsed object, and `str(result)` isn't needed.
+- Underneath it is the Claude example's second way, done for you. Strands adds a tool named after the class (`ItineraryReview`), with the class's JSON schema as its input, and the model answers by calling it. The script prints that call and its result from `agent.messages`.
+- The tool validates the arguments with Pydantic. If they don't fit, the errors go back to the model as the tool result, so it can fix them and call again.
+- According to the Strands source (`event_loop.py`), if the model ends its turn without calling the tool, Strands sends a follow-up prompt and forces the tool with `toolChoice`. In test runs no model needed this. All three called the tool on the first cycle, so `Stop reason` is `tool_use` and `Cycles` is 1.
+- Field descriptions go to the model as part of the schema, so they double as instructions, as in the other two folders.
+
+In test runs, the review of the sample plan took 13.0s on Sonnet, 8.2s on gpt-oss and 3.0s on Nova. All three marked it unrealistic with high crowd risk.
+
+```bash
+uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-structured-output.py
+uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-structured-output.py --planner thoughtful
+STRANDS_MODEL_PROVIDER=openai uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-structured-output.py
+STRANDS_MODEL_PROVIDER=amazon uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-structured-output.py
 ```
