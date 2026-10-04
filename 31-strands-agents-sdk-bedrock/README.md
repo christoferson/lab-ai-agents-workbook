@@ -55,6 +55,7 @@ Run all commands below from the repo root.
 | `strands-agent-agents-as-tools.py` | Orchestration by an LLM, with agents as tools (`agent.as_tool()`) |
 | `strands-agent-handoffs.py` | Handing the task to another agent with a `Swarm` |
 | `strands-agent-structured-output.py` | A typed Pydantic object as the answer (`structured_output_model`) |
+| `strands-agent-guardrails.py` | Input and output guardrails, as interventions |
 
 ### Basic agent
 
@@ -224,4 +225,30 @@ uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-structured-ou
 uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-structured-output.py --planner thoughtful
 STRANDS_MODEL_PROVIDER=openai uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-structured-output.py
 STRANDS_MODEL_PROVIDER=amazon uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-structured-output.py
+```
+
+### Guardrails
+
+`strands-agent-guardrails.py` is the Strands version of `openai-agent-guardrails.py` and `claude-agent-guardrails.py`. Three planners (thoughtful, offbeat, chaotic) answer the same request behind the same two guardrails: one rejects requests that aren't about Tokyo travel, and one refuses to deliver a plan that is unrealistic, crowded or barely about nature. Each guardrail runs a checker agent that answers with `structured_output_model`, as in the structured output example.
+
+The OpenAI Agents SDK has guardrails that raise an exception, and the Claude Agent SDK has hooks. Strands has **interventions**: `Agent(interventions=[...])` takes `InterventionHandler` subclasses, and Strands calls the lifecycle methods each one overrides (`before_invocation`, `before_model_call`, `after_model_call`, `before_tool_call`, `after_tool_call`). Each method returns an action: `Proceed`, `Deny`, `Guide`, `Confirm` or `Transform`. The handlers run in list order, so the cheap topic check goes first.
+
+- **Input guardrail: `before_invocation` returns `Deny`.** It runs a Topic Checker on the request. `Deny(reason=...)` cancels the call before the planner's model runs, so in a test the off-topic request cost the planner 0 tokens. The reply is `"DENIED: <reason>"` with stop reason `end_turn`, and nothing on the result says it was denied, so the guardrail object keeps its decisions for the script to read.
+- **After a `Deny`, don't reuse the agent.** Its `messages` hold only the `DENIED` reply, not the request, and the next call fails because Bedrock wants a conversation to start with a user message. The script builds a fresh planner for each run.
+- **Output guardrail: `after_model_call` returns `Guide`.** This runs after every model call, so it reviews only finished replies (`stop_reason == "end_turn"`). It works on the final reply itself, with no tool to route the plan through as in the Claude version.
+- **`Guide(feedback=...)` throws the reply away and calls the model again**, with the feedback added as a user message (`[itinerary_quality] Revise the plan...`). The rejected plan isn't kept in the history. Strands has no limit on these retries, so the guardrail counts them and asks for one revision at most.
+- **The output guardrail can't block.** `Deny` does nothing after a model call (Strands logs a warning), so the second failed plan still comes back as the result. The script withholds it, like the Claude version, which also tracks the block itself.
+
+In test runs, feedback often fixed the plan. All three models' chaotic planners turned a plan with nature 1 or 2 into one that passed, which an OpenAI tripwire can't do and the Claude version's chaotic planner reliably failed to do. gpt-oss's thoughtful and offbeat planners failed the realism check twice and were withheld. Nova's chaotic planner sometimes ignored its instructions and wrote a good plan first time. In one Nova run, an agent stopped at the model's output token limit and the script exited with `MaxTokensReachedException`; two reruns didn't repeat it.
+
+```bash
+uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-guardrails.py
+STRANDS_MODEL_PROVIDER=openai uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-guardrails.py
+STRANDS_MODEL_PROVIDER=amazon uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-guardrails.py
+
+# one planner at a time
+uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-guardrails.py --planner chaotic
+
+# trip the input guardrail instead
+uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-guardrails.py --planner thoughtful --request "Write me a Python script to rename files in a folder."
 ```

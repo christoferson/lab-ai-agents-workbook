@@ -13,10 +13,10 @@ The same examples in the OpenAI Agents SDK, the Claude Agent SDK and the Strands
 | [Agents as tools](#7-agents-as-tools) | [`openai-agent-agents-as-tools.py`](11-openai-agents-sdk-bedrock/openai-agent-agents-as-tools.py) | [`claude-agent-agents-as-tools.py`](21-claude-agents-sdk-bedrock/claude-agent-agents-as-tools.py) | [`strands-agent-agents-as-tools.py`](31-strands-agents-sdk-bedrock/strands-agent-agents-as-tools.py) |
 | [Handoffs](#8-handoffs) | [`openai-agent-handoffs.py`](11-openai-agents-sdk-bedrock/openai-agent-handoffs.py) | [`claude-agent-handoffs.py`](21-claude-agents-sdk-bedrock/claude-agent-handoffs.py) | [`strands-agent-handoffs.py`](31-strands-agents-sdk-bedrock/strands-agent-handoffs.py) |
 | [Structured output](#9-structured-output) | [`openai-agent-structured-output.py`](11-openai-agents-sdk-bedrock/openai-agent-structured-output.py) | [`claude-agent-structured-output.py`](21-claude-agents-sdk-bedrock/claude-agent-structured-output.py) | [`strands-agent-structured-output.py`](31-strands-agents-sdk-bedrock/strands-agent-structured-output.py) |
-| Guardrails | [`openai-agent-guardrails.py`](11-openai-agents-sdk-bedrock/openai-agent-guardrails.py) | [`claude-agent-guardrails.py`](21-claude-agents-sdk-bedrock/claude-agent-guardrails.py) | not yet |
+| [Guardrails](#10-guardrails) | [`openai-agent-guardrails.py`](11-openai-agents-sdk-bedrock/openai-agent-guardrails.py) | [`claude-agent-guardrails.py`](21-claude-agents-sdk-bedrock/claude-agent-guardrails.py) | [`strands-agent-guardrails.py`](31-strands-agents-sdk-bedrock/strands-agent-guardrails.py) |
 | Deep research | [`openai-agent-deep-research.py`](11-openai-agents-sdk-bedrock/openai-agent-deep-research.py) | [`claude-agent-deep-research.py`](21-claude-agents-sdk-bedrock/claude-agent-deep-research.py) | not yet |
 
-Guardrails and deep research have no Strands version yet, so they don't have a section here yet.
+Deep research has no Strands version yet, so it doesn't have a section here yet.
 
 ## 1. Basic agent
 
@@ -1001,6 +1001,138 @@ review = ItineraryReview.model_validate(
 
 ```python
 review = result.structured_output
+```
+
+</td></tr>
+</table>
+
+## 10. Guardrails
+
+<table>
+<tr><th width="33%">OpenAI Agents SDK</th><th width="33%">Claude Agent SDK</th><th width="33%">Strands Agents SDK</th></tr>
+
+<tr><td colspan="3">
+
+**Attach the guardrails.** OpenAI has guardrail lists on the agent. Claude registers hooks by event, and the output hook guards a `submit_plan` tool, since hooks see tool calls, not the final reply. Strands takes intervention handlers, which run in list order.
+
+</td></tr>
+<tr><td>
+
+```python
+Agent(
+    ...,
+    input_guardrails=[input_guard],
+    output_guardrails=[output_guard],
+)
+```
+
+</td><td>
+
+```python
+ClaudeAgentOptions(
+    ...,
+    tools=[submit_plan],
+    hooks={
+        "UserPromptSubmit": [HookMatcher(
+            hooks=[topic.hook], ...)],
+        "PreToolUse": [HookMatcher(
+            matcher=tool_name(submit_plan),
+            hooks=[quality.hook], ...)],
+    },
+)
+```
+
+</td><td>
+
+```python
+Agent(
+    ...,
+    interventions=[
+        topic_guard, plan_guard
+    ],
+)
+```
+
+</td></tr>
+
+<tr><td colspan="3">
+
+**Reject the request.** Each check runs before the planner's model is called, so an off-topic request costs only the check. OpenAI raises an exception, Claude drops the prompt, and Strands replies `"DENIED: <reason>"`.
+
+</td></tr>
+<tr><td>
+
+```python
+@input_guardrail(
+    name="tokyo_travel_only",
+    run_in_parallel=False,
+)
+async def topic_guardrail(ctx, agent, input):
+    ...
+    return GuardrailFunctionOutput(
+        output_info={"check": check},
+        tripwire_triggered=(
+            not check.is_tokyo_travel
+        ),
+    )
+```
+
+</td><td>
+
+```python
+async def hook(self, hook_input, ...):
+    ...
+    return {
+        "decision": "block",
+        "reason": f"Off topic: {reason}",
+    }
+```
+
+</td><td>
+
+```python
+class TopicGuardrail(
+    InterventionHandler
+):
+    async def before_invocation(
+        self, event, **kwargs
+    ):
+        ...
+        return Deny(reason=check.reason)
+```
+
+</td></tr>
+
+<tr><td colspan="3">
+
+**Reject the plan.** OpenAI's tripwire raises, and the plan is lost. Claude's denial reaches the planner as the tool result, so it can revise, and a second failure stops the run. Strands' `Guide` discards the reply and retries with the feedback. It can't block after a model call, so the script withholds a second failure itself.
+
+</td></tr>
+<tr><td>
+
+```python
+except OutputGuardrailTripwireTriggered as e:
+    e.guardrail_result.agent_output
+```
+
+</td><td>
+
+```python
+return {"hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "deny",
+    "permissionDecisionReason": feedback,
+}}
+```
+
+</td><td>
+
+```python
+async def after_model_call(
+    self, event, **kwargs
+):
+    ...
+    return Guide(feedback=feedback)
 ```
 
 </td></tr>
