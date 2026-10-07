@@ -56,6 +56,7 @@ Run all commands below from the repo root.
 | `strands-agent-handoffs.py` | Handing the task to another agent with a `Swarm` |
 | `strands-agent-structured-output.py` | A typed Pydantic object as the answer (`structured_output_model`) |
 | `strands-agent-guardrails.py` | Input and output guardrails, as interventions |
+| `strands-agent-deep-research.py` | A research pipeline: plan, search the web in parallel, write, fact-check, save |
 
 ### Basic agent
 
@@ -251,4 +252,51 @@ uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-guardrails.py
 
 # trip the input guardrail instead
 uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-guardrails.py --planner thoughtful --request "Write me a Python script to rename files in a folder."
+```
+
+### Deep research
+
+`strands-agent-deep-research.py` is the Strands version of `openai-agent-deep-research.py` and `claude-agent-deep-research.py`, with the same pipeline, run by plain Python code:
+
+1. A Planner turns the query into 3 searches.
+2. Searchers run them in parallel.
+3. A Writer turns the summaries into a report.
+4. A Fact Checker verifies the report, and a Writer revises it until the check passes (up to 3 rounds).
+5. A Publisher saves the report to `reports/strands/`, which is git-ignored.
+
+Every agent gets today's date, so "this autumn" means the right year.
+
+What differs from the other two versions:
+
+- **Web search is a custom tool**, as in the Claude version. The Converse API that `BedrockModel` uses has no web search, so `web_search` is an `async` `@tool` that calls Bedrock's own web search: a Responses API request with `tools=[{"type": "web_search", ...}]` on the model in `BEDROCK_MODEL_ID`. Converse rejects that model, but the Responses API runs it. `external_web_access=False` keeps retrieval inside AWS.
+- **No `tool_choice="required"`.** The other two versions force the search with it. In October 2026 tests, every request with it timed out after 90 to 300 seconds. Without it, a search took 30 to 50 seconds, and the model still searched 2 or 3 times and cited its sources.
+- **Every level has a timeout.** Bedrock web search can hang, and Strands has no time limit for a whole agent run, so the script sets three:
+  - **Web search:** each request gets 90 seconds and 1 retry (`AsyncOpenAI(timeout=..., max_retries=1)`), instead of the client's default of 10 minutes and 2 retries. A failed search reaches the agent as an `error` tool result, and the agent carries on.
+  - **Model calls:** each Bedrock call waits up to 120 seconds for data, with up to 3 attempts in total (`BedrockModel(boto_client_config=...)`). Passing your own botocore config replaces Strands' default, which sets only the 120-second read timeout.
+  - **Agent steps:** each agent run is wrapped in `asyncio.wait_for(agent.invoke_async(...), 600)`. In a test, this stopped an agent on time whether it was waiting on the model or on a tool.
+  - **When a step times out:** a timed-out search is skipped. A timed-out fact check publishes the report unchecked. The Planner, Writer or Publisher timing out stops the run with a message. If no web search succeeds at all, the run stops before the Writer, which would otherwise write from memory.
+- **There is no page fetch.** The Claude Fact Checker can read a source page with the built-in `WebFetch`. Strands' core package has no such tool, so this Fact Checker verifies with `web_search` only.
+- **Structured output is `structured_output_model`**, as in the structured output example. The Planner, Writer and Fact Checker are called with `invoke_async(prompt, structured_output_model=SearchPlan)` (or `ReportData`, `FactCheck`) and return `result.structured_output`.
+- **Every step gets a fresh `Agent`.** A Strands agent keeps its conversation, and it can't run two calls at once: in a test, a second `invoke_async` on a busy agent raised `ConcurrencyException`. So the three parallel searches need three agents. A `Role` holds the name, system prompt and tools, and `Strands.agent(role)` builds the agent, all on one shared `BedrockModel`.
+- **There are two bills.** The agents' tokens are summed from each agent's `event_loop_metrics`. Web searches are billed to the search model, so the script counts them and their tokens separately.
+
+Test runs on all three models:
+
+| Model | Time | Agent tokens in / out | Web searches | Fact check |
+| --- | --- | --- | --- | --- |
+| Claude Sonnet | 6.6 min | 111k / 14k | 17 | Passed in round 1 after 12 lookups |
+| gpt-oss | 10.6 min | 173k / 28k | 20 | Fixes each round, stopped after 3 |
+| Nova 2 Lite | 2.5 min | 42k / 6k | 8 | Argued over peak dates, stopped after 3 |
+
+- Claude's Planner chose Japanese search terms, so its search summaries were in Japanese, but the report was in English. Its Fact Checker searched for 12 specific facts, such as train times and forecast dates, and found nothing to fix.
+- gpt-oss's Fact Checker caught real errors. The report reached Hinohara via a "Hinoharu" station on the JR Hachiko Line, which doesn't exist (the route is the Itsukaichi Line to Musashi-Itsukaichi). It also named a "Kawagoe-Yamamura Forest" that no source confirms. Later rounds found a same-day trip that couldn't be done by public transport.
+- Nova's checker kept correcting peak dates that its sources disagree on. Mt. Takao's summit peak went from mid-November to about November 22 in round 2 and back to mid-November in round 3. It also listed claims as issues while saying "No correction needed". Its last revision came back with an empty `short_summary`.
+
+```bash
+uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-deep-research.py
+STRANDS_MODEL_PROVIDER=openai uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-deep-research.py
+STRANDS_MODEL_PROVIDER=amazon uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-deep-research.py
+
+# research a different question
+uv run --env-file .env 31-strands-agents-sdk-bedrock/strands-agent-deep-research.py --query "Quiet onsen towns within two hours of Tokyo for a winter weekend"
 ```

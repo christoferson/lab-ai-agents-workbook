@@ -14,9 +14,7 @@ The same examples in the OpenAI Agents SDK, the Claude Agent SDK and the Strands
 | [Handoffs](#8-handoffs) | [`openai-agent-handoffs.py`](11-openai-agents-sdk-bedrock/openai-agent-handoffs.py) | [`claude-agent-handoffs.py`](21-claude-agents-sdk-bedrock/claude-agent-handoffs.py) | [`strands-agent-handoffs.py`](31-strands-agents-sdk-bedrock/strands-agent-handoffs.py) |
 | [Structured output](#9-structured-output) | [`openai-agent-structured-output.py`](11-openai-agents-sdk-bedrock/openai-agent-structured-output.py) | [`claude-agent-structured-output.py`](21-claude-agents-sdk-bedrock/claude-agent-structured-output.py) | [`strands-agent-structured-output.py`](31-strands-agents-sdk-bedrock/strands-agent-structured-output.py) |
 | [Guardrails](#10-guardrails) | [`openai-agent-guardrails.py`](11-openai-agents-sdk-bedrock/openai-agent-guardrails.py) | [`claude-agent-guardrails.py`](21-claude-agents-sdk-bedrock/claude-agent-guardrails.py) | [`strands-agent-guardrails.py`](31-strands-agents-sdk-bedrock/strands-agent-guardrails.py) |
-| Deep research | [`openai-agent-deep-research.py`](11-openai-agents-sdk-bedrock/openai-agent-deep-research.py) | [`claude-agent-deep-research.py`](21-claude-agents-sdk-bedrock/claude-agent-deep-research.py) | not yet |
-
-Deep research has no Strands version yet, so it doesn't have a section here yet.
+| [Deep research](#11-deep-research) | [`openai-agent-deep-research.py`](11-openai-agents-sdk-bedrock/openai-agent-deep-research.py) | [`claude-agent-deep-research.py`](21-claude-agents-sdk-bedrock/claude-agent-deep-research.py) | [`strands-agent-deep-research.py`](31-strands-agents-sdk-bedrock/strands-agent-deep-research.py) |
 
 ## 1. Basic agent
 
@@ -1133,6 +1131,177 @@ async def after_model_call(
 ):
     ...
     return Guide(feedback=feedback)
+```
+
+</td></tr>
+</table>
+
+## 11. Deep research
+
+<table>
+<tr><th width="33%">OpenAI Agents SDK</th><th width="33%">Claude Agent SDK</th><th width="33%">Strands Agents SDK</th></tr>
+
+<tr><td colspan="3">
+
+**Give the agents web search.** OpenAI has a hosted `WebSearchTool`. Claude Code's `WebSearch` isn't offered on Bedrock, and the Converse API that Strands uses has no web search. So both make `web_search` a custom tool that sends a Responses API request with Bedrock's web search to the model in `BEDROCK_MODEL_ID`.
+
+</td></tr>
+<tr><td>
+
+```python
+web_search = WebSearchTool(
+    search_context_size="medium",
+    external_web_access=False,
+)
+```
+
+</td><td>
+
+```python
+@tool("web_search", ...,
+      {"query": Annotated[str, ...]})
+async def web_search(args):
+    text = await self.search(args["query"])
+    return {"content": [
+        {"type": "text", "text": text}]}
+```
+
+</td><td>
+
+```python
+@tool
+async def web_search(query: str) -> str:
+    """Search the web and ..."""
+    return await self.search(query)
+```
+
+</td></tr>
+
+<tr><td colspan="3">
+
+**Force the search.** OpenAI and Claude send `tool_choice="required"`, so the search model always searches. In October 2026 tests, every request with it timed out, so Strands leaves it out and relies on the instruction to search. The model still searched each time.
+
+</td></tr>
+<tr><td>
+
+```python
+model_settings=ModelSettings(
+    tool_choice="required",
+    extra_body={"tools": [BEDROCK_WEB_SEARCH]},
+)
+```
+
+</td><td>
+
+```python
+await self.client.responses.create(
+    ...,
+    tools=[{"type": "web_search", ...}],
+    tool_choice="required",
+)
+```
+
+</td><td>
+
+```python
+await self.client.responses.create(
+    ...,
+    tools=[{"type": "web_search", ...}],
+)
+```
+
+</td></tr>
+
+<tr><td colspan="3">
+
+**Hand typed data between stages.** Each stage returns `SearchPlan`, `ReportData` or `FactCheck`. OpenAI and Strands take the class and parse the answer. Claude reads the object off a `submit_*` tool call, as in the structured output example.
+
+</td></tr>
+<tr><td>
+
+```python
+result = await Runner.run(planner, prompt)
+plan = result.final_output
+```
+
+</td><td>
+
+```python
+plan, _ = await claude.ask_for(
+    SearchPlan, planner, prompt)
+```
+
+</td><td>
+
+```python
+result = await agent.invoke_async(
+    prompt,
+    structured_output_model=SearchPlan,
+)
+plan = result.structured_output
+```
+
+</td></tr>
+
+<tr><td colspan="3">
+
+**Search in parallel.** All three use `asyncio.gather`. An OpenAI `Agent` is only configuration and each Claude `query` is its own subprocess, so one definition serves all searches. A Strands `Agent` holds its conversation and raises `ConcurrencyException` on a second call at once, so each search builds a fresh agent.
+
+</td></tr>
+<tr><td>
+
+```python
+await asyncio.gather(*(
+    search(searcher, item)
+    for item in plan.searches))
+```
+
+</td><td>
+
+```python
+await asyncio.gather(*(
+    search(claude, searcher, item)
+    for item in plan.searches))
+```
+
+</td><td>
+
+```python
+agent = strands.agent(searcher)  # fresh
+
+await asyncio.gather(*(
+    search(strands, searcher, item)
+    for item in plan.searches))
+```
+
+</td></tr>
+
+<tr><td colspan="3">
+
+**Count the cost.** In OpenAI, web search is a hosted tool on the agents' own model, and the script prints no usage. In Claude and Strands it runs on another model, so they count those calls and tokens separately: Claude next to `total_cost_usd`, Strands next to each agent's `event_loop_metrics`.
+
+</td></tr>
+<tr><td>
+
+```python
+# not printed
+```
+
+</td><td>
+
+```python
+sum(run.total_cost_usd or 0
+    for run in claude.runs)
+web.calls, web.input_tokens
+```
+
+</td><td>
+
+```python
+sum(a.event_loop_metrics
+    .accumulated_usage["inputTokens"]
+    for a in strands.agents)
+web.calls, web.input_tokens
 ```
 
 </td></tr>
