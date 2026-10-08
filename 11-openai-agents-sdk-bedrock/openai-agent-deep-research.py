@@ -6,7 +6,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
-from openai import AsyncOpenAI
+from openai import APITimeoutError, AsyncOpenAI
 from openai.providers import bedrock
 from pydantic import BaseModel, Field
 # Import the explicit tracing control from the agents SDK
@@ -19,6 +19,11 @@ DEFAULT_QUERY = "Best places to see autumn leaves near Tokyo this autumn while a
 HOW_MANY_SEARCHES = 3
 MAX_REVIEW_ROUNDS = 3
 OUTPUT_DIR = Path(__file__).with_name("reports")
+
+# Timeouts, so a stuck call fails instead of hanging the pipeline. The SDK has no time limit for a
+# whole run, so the script sets one around each run.
+MODEL_TIMEOUT = 180  # one model request, including any web searches it makes (usually 30-60s), retried once
+STEP_TIMEOUT = 600   # one agent's whole run, with all its model and tool calls
 
 # Japan has no daylight saving time, so a fixed offset avoids needing the tzdata package on Windows
 JST = timezone(timedelta(hours=9), "JST")
@@ -109,13 +114,14 @@ def create_agents(model_id: str) -> dict[str, Agent]:
         ),
         "searcher": Agent(
             name="Searcher",
-            instructions=f"{date_note} You search the web for one search term and write a concise summary of the "
-                         "results in under 120 words. Capture only facts useful to a traveler, and note which "
+            instructions=f"{date_note} You search the web for one search term. Always search first, rather than "
+                         "answering from memory. Then write a concise summary of the results in under 120 words. Capture only facts useful to a traveler, and note which "
                          "year any dates or forecasts refer to.",
             model=model_id,
             tools=[web_search],
-            # Force a search, so the summary is grounded in current results rather than the model's memory
-            model_settings=ModelSettings(tool_choice="required", extra_body={"tools": [BEDROCK_WEB_SEARCH]}),
+            # No tool_choice="required" to force the search: in October 2026 tests every such request timed
+            # out, while the default "auto" plus the instruction to search first still searched each time
+            model_settings=ModelSettings(extra_body={"tools": [BEDROCK_WEB_SEARCH]}),
         ),
         "writer": Agent(
             name="Writer",
@@ -175,9 +181,24 @@ def clean_url(url: str) -> str:
 
 # --- The pipeline: plain Python code decides the order, agents do each step ---
 
+class StepTimeout(Exception):
+    """An agent didn't finish its step in time."""
+
+
+async def run_step(agent: Agent, prompt: str):
+    """Runner.run, giving up after STEP_TIMEOUT seconds, or when a model request times out after its retry.
+    wait_for cancels the request the agent is waiting on, so the step ends on time."""
+    try:
+        return await asyncio.wait_for(Runner.run(agent, prompt), STEP_TIMEOUT)
+    except TimeoutError:
+        raise StepTimeout(f"{agent.name} did not finish within {STEP_TIMEOUT}s") from None
+    except APITimeoutError:
+        raise StepTimeout(f"{agent.name}'s model request timed out after {MODEL_TIMEOUT}s") from None
+
+
 async def plan_searches(planner: Agent, query: str) -> SearchPlan:
     print(f"1. {planner.name}: planning searches...")
-    result = await Runner.run(planner, f"Query: {query}")
+    result = await run_step(planner, f"Query: {query}")
     plan = result.final_output
     for i, item in enumerate(plan.searches, 1):
         print(f"   {i}. {item.query!r} - {item.reason}")
@@ -185,20 +206,30 @@ async def plan_searches(planner: Agent, query: str) -> SearchPlan:
     return plan
 
 
-async def search(searcher: Agent, item: SearchItem) -> str:
-    """Run one web search and return its summary followed by the sources it cited."""
-    result = await Runner.run(searcher, f"Search term: {item.query}\nReason for searching: {item.reason}")
+async def search(searcher: Agent, item: SearchItem) -> tuple[str, int]:
+    """Run one web search and return its summary followed by the sources it cited, and how many
+    searches it made."""
+    try:
+        result = await run_step(searcher, f"Search term: {item.query}\nReason for searching: {item.reason}")
+    except StepTimeout as e:
+        # One lost search shouldn't stop the report, so the writer gets the others
+        print(f"   * {item.query!r}: {e}, skipped")
+        return f"(No results for {item.query!r}: the search timed out.)", 0
     searches = sum(1 for i in result.new_items if i.type == "tool_call_item")
     sources = extract_sources(result)
     print(f"   * {item.query!r}: {searches} web search call(s), {len(sources)} source(s) cited")
     # Clean the inline links too, since the writer copies URLs from the summary text
     summary = re.sub(r"https?://[^\s)\]]+", lambda m: clean_url(m.group()), result.final_output)
-    return summary + "\nSources:\n" + "\n".join(f"- {s}" for s in sources)
+    return summary + "\nSources:\n" + "\n".join(f"- {s}" for s in sources), searches
 
 
 async def run_searches(searcher: Agent, plan: SearchPlan) -> list[str]:
     print(f"2. {searcher.name}: running {len(plan.searches)} searches in parallel...")
-    summaries = await asyncio.gather(*(search(searcher, item) for item in plan.searches))
+    results = await asyncio.gather(*(search(searcher, item) for item in plan.searches))
+    if sum(searches for _, searches in results) == 0:
+        # Without a single search the writer would write from memory
+        sys.exit("Stopped: no web search succeeded, so there is nothing to base a report on.")
+    summaries = [summary for summary, _ in results]
     print()
     for item, summary in zip(plan.searches, summaries):
         print(f"   --- Summary for {item.query!r} ---")
@@ -208,7 +239,7 @@ async def run_searches(searcher: Agent, plan: SearchPlan) -> list[str]:
 
 async def write_report(writer: Agent, query: str, summaries: list[str]) -> ReportData:
     print(f"3. {writer.name}: writing the report...")
-    result = await Runner.run(writer, f"Original query: {query}\nSummarized search results: {summaries}")
+    result = await run_step(writer, f"Original query: {query}\nSummarized search results: {summaries}")
     report = result.final_output
     print(f"   Summary: {report.short_summary}\n")
     return report
@@ -222,7 +253,7 @@ async def check_facts(fact_checker: Agent, report: ReportData, summaries: list[s
         # Without this, a later round can re-flag a fixed claim or undo a correction
         done = "\n".join(f"- {i.claim} -> {i.correction}" for i in fixed)
         prompt += f"\n\nCorrections already applied in earlier rounds (don't re-flag them unless still wrong):\n{done}"
-    result = await Runner.run(fact_checker, prompt)
+    result = await run_step(fact_checker, prompt)
     check = result.final_output
     searches = [i.raw_item for i in result.new_items if i.type == "tool_call_item"]
     print(f"   {len(check.issues)} issue(s) found, {len(searches)} verification search(es)")
@@ -243,7 +274,7 @@ async def revise_report(writer: Agent, report: ReportData, check: FactCheck, sum
     print(f"   {writer.name}: revising the report to fix {len(check.issues)} issue(s)...")
     issues = "\n".join(f"- {i.claim} -> {i.correction}" for i in check.issues)
     # Send the whole ReportData, so the writer keeps the follow-up questions and summarizes findings, not its edits
-    result = await Runner.run(writer, "Revise this report. Correct each flagged claim wherever it appears, "
+    result = await run_step(writer, "Revise this report. Correct each flagged claim wherever it appears, "
                                       "without repeating information elsewhere, and keep everything else, "
                                       "including the follow-up questions. The short_summary must still summarize "
                                       "the findings, not describe your edits.\n\n"
@@ -258,7 +289,12 @@ async def review_report(fact_checker: Agent, writer: Agent, report: ReportData, 
     """Check and revise until the fact checker finds no issues, for at most MAX_REVIEW_ROUNDS rounds."""
     fixed: list[FactIssue] = []
     for round_no in range(1, MAX_REVIEW_ROUNDS + 1):
-        check = await check_facts(fact_checker, report, summaries, round_no, fixed)
+        try:
+            check = await check_facts(fact_checker, report, summaries, round_no, fixed)
+        except StepTimeout as e:
+            # The report still exists, so publish it rather than lose the run
+            print(f"   {e}. Publishing the report without this check.\n")
+            return report
         if not check.issues:
             print(f"   Review passed in round {round_no}.\n")
             return report
@@ -271,7 +307,7 @@ async def review_report(fact_checker: Agent, writer: Agent, report: ReportData, 
 
 async def publish_report(publisher: Agent, report: ReportData) -> str:
     print(f"5. {publisher.name}: saving the report...")
-    result = await Runner.run(publisher, report.markdown_report)
+    result = await run_step(publisher, report.markdown_report)
     print(f"   {result.final_output}\n")
     return result.final_output
 
@@ -293,10 +329,13 @@ async def main(query: str):
     print("--------------------------\n")
 
     # 3. Instantiate Bedrock client using the official provider framework.
+    #    Without a timeout the client waits 10 minutes for a request and retries twice.
     bedrock_client = AsyncOpenAI(
         provider=bedrock(
             region=region
-        )
+        ),
+        timeout=MODEL_TIMEOUT,
+        max_retries=1,
     )
 
     # 4. Register your Bedrock client as default for the OpenAI Agents SDK
@@ -315,7 +354,8 @@ async def main(query: str):
     print(f"5. {agents['publisher'].name}:    report -> Markdown file, using the save_report tool")
     print(f"Date given to agents: {today()} (Japan time)")
     print(f"Web search: search_context_size={web_search.search_context_size!r}, "
-          f"external_web_access={web_search.external_web_access}\n")
+          f"external_web_access={web_search.external_web_access}")
+    print(f"Timeouts: model request {MODEL_TIMEOUT}s (1 retry), agent step {STEP_TIMEOUT}s\n")
 
     print("--- Query ---")
     print(f"{query}\n")
@@ -340,4 +380,8 @@ if __name__ == "__main__":
     # Web content contains characters like em dashes that Windows code pages (e.g. cp932) can't encode
     # when output is redirected to a file, so always write UTF-8
     sys.stdout.reconfigure(encoding="utf-8")
-    asyncio.run(main(args.query))
+    try:
+        asyncio.run(main(args.query))
+    except StepTimeout as e:
+        # The planner, writer and publisher have no fallback, so the run stops with a clear reason
+        sys.exit(f"\nStopped: {e}.")

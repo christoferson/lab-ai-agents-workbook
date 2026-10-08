@@ -1179,14 +1179,13 @@ async def web_search(query: str) -> str:
 
 <tr><td colspan="3">
 
-**Force the search.** OpenAI and Claude send `tool_choice="required"`, so the search model always searches. In October 2026 tests, every request with it timed out, so Strands leaves it out and relies on the instruction to search. The model still searched each time.
+**Ask for the search, don't force it.** `tool_choice="required"` would make the search model always search, but in October 2026 tests every web search request with it timed out. So none of the three sends it, and the instructions say to search first instead. The model still searched each time.
 
 </td></tr>
 <tr><td>
 
 ```python
 model_settings=ModelSettings(
-    tool_choice="required",
     extra_body={"tools": [BEDROCK_WEB_SEARCH]},
 )
 ```
@@ -1197,7 +1196,6 @@ model_settings=ModelSettings(
 await self.client.responses.create(
     ...,
     tools=[{"type": "web_search", ...}],
-    tool_choice="required",
 )
 ```
 
@@ -1214,13 +1212,53 @@ await self.client.responses.create(
 
 <tr><td colspan="3">
 
+**Set timeouts.** None of the SDKs limits a whole run, so each script wraps every agent step in `asyncio.wait_for(..., 600)`. Each one also limits single requests, in its own place. OpenAI's hosted search runs inside the model request, so one client timeout covers both. Claude's bundled CLI reads `API_TIMEOUT_MS` and `CLAUDE_CODE_MAX_RETRIES` from `options.env`. Strands takes a botocore config, which replaces its default `read_timeout=120`. Claude and Strands also give their search client its own timeout. In all three, a timed-out search is skipped and a timed-out fact check publishes the report unchecked.
+
+</td></tr>
+<tr><td>
+
+```python
+AsyncOpenAI(provider=bedrock(...),
+            timeout=180, max_retries=1)
+
+await asyncio.wait_for(
+    Runner.run(agent, prompt), 600)
+```
+
+</td><td>
+
+```python
+env={...,
+     "API_TIMEOUT_MS": "120000",
+     "CLAUDE_CODE_MAX_RETRIES": "2"}
+
+await asyncio.wait_for(
+    self.collect(agent, prompt), 600)
+```
+
+</td><td>
+
+```python
+BedrockModel(...,
+    boto_client_config=BotocoreConfig(
+        read_timeout=120,
+        retries={"total_max_attempts": 3}))
+
+await asyncio.wait_for(
+    agent.invoke_async(prompt), 600)
+```
+
+</td></tr>
+
+<tr><td colspan="3">
+
 **Hand typed data between stages.** Each stage returns `SearchPlan`, `ReportData` or `FactCheck`. OpenAI and Strands take the class and parse the answer. Claude reads the object off a `submit_*` tool call, as in the structured output example.
 
 </td></tr>
 <tr><td>
 
 ```python
-result = await Runner.run(planner, prompt)
+result = await run_step(planner, prompt)
 plan = result.final_output
 ```
 

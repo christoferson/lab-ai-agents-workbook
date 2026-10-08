@@ -269,7 +269,7 @@ Every agent gets today's date, so "this autumn" means the right year.
 What differs from the other two versions:
 
 - **Web search is a custom tool**, as in the Claude version. The Converse API that `BedrockModel` uses has no web search, so `web_search` is an `async` `@tool` that calls Bedrock's own web search: a Responses API request with `tools=[{"type": "web_search", ...}]` on the model in `BEDROCK_MODEL_ID`. Converse rejects that model, but the Responses API runs it. `external_web_access=False` keeps retrieval inside AWS.
-- **No `tool_choice="required"`.** The other two versions force the search with it. In October 2026 tests, every request with it timed out after 90 to 300 seconds. Without it, a search took 30 to 50 seconds, and the model still searched 2 or 3 times and cited its sources.
+- **No `tool_choice="required"`.** None of the three versions forces the search with it. In October 2026 tests, every request with it timed out after 90 to 300 seconds. Without it, a search took 30 to 50 seconds, and the model still searched 2 or 3 times and cited its sources.
 - **Every level has a timeout.** Bedrock web search can hang, and Strands has no time limit for a whole agent run, so the script sets three:
   - **Web search:** each request gets 90 seconds and 1 retry (`AsyncOpenAI(timeout=..., max_retries=1)`), instead of the client's default of 10 minutes and 2 retries. A failed search reaches the agent as an `error` tool result, and the agent carries on.
   - **Model calls:** each Bedrock call waits up to 120 seconds for data, with up to 3 attempts in total (`BedrockModel(boto_client_config=...)`). Passing your own botocore config replaces Strands' default, which sets only the 120-second read timeout.

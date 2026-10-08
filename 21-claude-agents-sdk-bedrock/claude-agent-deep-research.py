@@ -9,10 +9,10 @@ from pathlib import Path
 from typing import Annotated
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from claude_agent_sdk import (
-    AssistantMessage, ClaudeAgentOptions, ResultMessage, ToolResultBlock, ToolUseBlock, UserMessage,
-    create_sdk_mcp_server, delete_session, query, tool,
+    AssistantMessage, ClaudeAgentOptions, ResultError, ResultMessage, SystemMessage, ToolResultBlock, ToolUseBlock,
+    UserMessage, create_sdk_mcp_server, delete_session, query, tool,
 )
-from openai import AsyncOpenAI
+from openai import APIError, AsyncOpenAI
 from openai.providers import bedrock
 from pydantic import BaseModel, Field
 
@@ -23,6 +23,13 @@ MAX_REVIEW_ROUNDS = 3
 OUTPUT_DIR = Path(__file__).with_name("reports") / "claude"
 SERVER_NAME = "research"
 WEB_FETCH = "WebFetch"  # Claude Code's built-in tool for reading one page; it works on Bedrock
+
+# Timeouts, so a stuck call fails instead of hanging the pipeline. The SDK has no time limit for a
+# whole run, so the script sets one around each run.
+SEARCH_TIMEOUT = 90   # one web search request (usually 30-50s), retried once
+MODEL_TIMEOUT = 120   # one Claude model request, retried up to MODEL_RETRIES times
+MODEL_RETRIES = 2
+STEP_TIMEOUT = 600    # one agent's whole run, with all its model and tool calls
 
 # Japan has no daylight saving time, so a fixed offset avoids needing the tzdata package on Windows
 JST = timezone(timedelta(hours=9), "JST")
@@ -113,7 +120,8 @@ class BedrockWebSearch:
             # external_web_access=False keeps retrieval inside AWS, and works with AmazonBedrockFullAccess,
             # which does not grant bedrock-websearch:ExternalWebAccess
             tools=[{"type": "web_search", "search_context_size": "medium", "external_web_access": False}],
-            tool_choice="required",  # always search, rather than answer from the model's memory
+            # No tool_choice="required": in October 2026 tests every such request timed out, while the
+            # default "auto" plus the instruction above still searched each time
         )
         self.calls += 1
         self.input_tokens += response.usage.input_tokens
@@ -138,7 +146,13 @@ class BedrockWebSearch:
         @tool("web_search", "Search the web and get a short summary of the results with source URLs.",
               {"query": Annotated[str, "The search terms to use"]})
         async def web_search(args):
-            return {"content": [{"type": "text", "text": await self.search(args["query"])}]}
+            try:
+                text = await self.search(args["query"])
+            except APIError as e:
+                # The agent gets the error as the tool result, so it can try other terms or carry on
+                print(f"   web_search {args['query']!r} failed: {e}")
+                return {"content": [{"type": "text", "text": f"Web search failed: {e}"}], "is_error": True}
+            return {"content": [{"type": "text", "text": text}]}
         return web_search
 
 
@@ -192,6 +206,10 @@ def result_text(block: ToolResultBlock) -> str:
     return block.content or "(no result)"
 
 
+class StepTimeout(Exception):
+    """An agent didn't finish its step in time."""
+
+
 @dataclass
 class Claude:
     """Where every run gets its model and credentials, and where every run is recorded for the cost
@@ -200,6 +218,7 @@ class Claude:
     profile: str
     region: str
     runs: list[ResultMessage] = field(default_factory=list)
+    sessions: set[str] = field(default_factory=set)  # recorded as each run starts, so timed-out ones too
 
     def options(self, agent: Agent) -> ClaudeAgentOptions:
         """Factory: the ClaudeAgentOptions for one agent, with all its tools pre-approved."""
@@ -211,16 +230,32 @@ class Claude:
             allowed_tools=[tool_name(t) for t in agent.tools] + agent.built_in_tools,  # no one to ask
             max_turns=agent.max_turns,
             setting_sources=[],  # don't load ~/.claude or project settings and CLAUDE.md files into the agent
-            env={"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": self.profile, "AWS_REGION": self.region},
+            env={"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": self.profile, "AWS_REGION": self.region,
+                 # The CLI otherwise waits 10 minutes for a model request
+                 "API_TIMEOUT_MS": str(MODEL_TIMEOUT * 1000), "CLAUDE_CODE_MAX_RETRIES": str(MODEL_RETRIES)},
         )
 
     async def run(self, agent: Agent, prompt: str) -> Run:
-        """Run one agent on one prompt and collect its tool calls with their results."""
+        """Run one agent on one prompt and collect its tool calls with their results, giving up after
+        STEP_TIMEOUT seconds, or when a model request times out after its retries."""
+        try:
+            return await asyncio.wait_for(self.collect(agent, prompt), STEP_TIMEOUT)
+        except TimeoutError:
+            # wait_for cancels the query, which stops the CLI process
+            raise StepTimeout(f"{agent.name} did not finish within {STEP_TIMEOUT}s") from None
+        except ResultError as e:
+            if e.terminal_reason == "api_error" and "timed out" in (e.result or ""):
+                raise StepTimeout(f"{agent.name}'s model request timed out after {MODEL_TIMEOUT}s") from None
+            raise
+
+    async def collect(self, agent: Agent, prompt: str) -> Run:
         calls: list[ToolUseBlock] = []
         outputs: dict[str, str] = {}
         final = None
         async for message in query(prompt=prompt, options=self.options(agent)):
-            if isinstance(message, AssistantMessage):
+            if isinstance(message, SystemMessage) and message.subtype == "init":
+                self.sessions.add(message.data["session_id"])
+            elif isinstance(message, AssistantMessage):
                 calls += [block for block in message.content if isinstance(block, ToolUseBlock)]
             elif isinstance(message, UserMessage) and isinstance(message.content, list):
                 outputs |= {b.tool_use_id: result_text(b) for b in message.content if isinstance(b, ToolResultBlock)}
@@ -305,15 +340,23 @@ async def plan_searches(claude: Claude, planner: Agent, research_query: str) -> 
 
 async def search(claude: Claude, searcher: Agent, item: SearchItem) -> str:
     """Research one search term and return the searcher's summary."""
-    run = await claude.run(searcher, f"Search term: {item.query}\nReason for searching: {item.reason}")
+    try:
+        run = await claude.run(searcher, f"Search term: {item.query}\nReason for searching: {item.reason}")
+    except StepTimeout as e:
+        # One lost search shouldn't stop the report, so the writer gets the others
+        print(f"   * {item.query!r}: {e}, skipped")
+        return f"(No results for {item.query!r}: the search timed out.)"
     lookups = [call.input.get("query") for call, _ in run.tool_calls if call.name.endswith("__web_search")]
     print(f"   * {item.query!r}: {len(lookups)} web_search call(s): {lookups}")
     return run.result.result
 
 
-async def run_searches(claude: Claude, searcher: Agent, plan: SearchPlan) -> list[str]:
+async def run_searches(claude: Claude, searcher: Agent, web: BedrockWebSearch, plan: SearchPlan) -> list[str]:
     print(f"2. {searcher.name}: running {len(plan.searches)} searches in parallel...")
     summaries = await asyncio.gather(*(search(claude, searcher, item) for item in plan.searches))
+    if web.calls == 0:
+        # Searchers still reply when every search fails, and the writer would then write from memory
+        sys.exit("Stopped: no web search succeeded, so there is nothing to base a report on.")
     print()
     for item, summary in zip(plan.searches, summaries):
         print(f"   --- Summary for {item.query!r} ---")
@@ -376,7 +419,12 @@ async def review_report(claude: Claude, fact_checker: Agent, writer: Agent, repo
     """Check and revise until the fact checker finds no issues, for at most MAX_REVIEW_ROUNDS rounds."""
     fixed: list[FactIssue] = []
     for round_no in range(1, MAX_REVIEW_ROUNDS + 1):
-        check = await check_facts(claude, fact_checker, report, summaries, round_no, fixed)
+        try:
+            check = await check_facts(claude, fact_checker, report, summaries, round_no, fixed)
+        except StepTimeout as e:
+            # The report still exists, so publish it rather than lose the run
+            print(f"   {e}. Publishing the report without this check.\n")
+            return report
         if not check.issues:
             print(f"   Review passed in round {round_no}.\n")
             return report
@@ -413,7 +461,8 @@ async def main(research_query: str):
     print("--------------------------\n")
 
     # 2. The web search tool, and the pipeline's agents
-    web = BedrockWebSearch(AsyncOpenAI(provider=bedrock(region=region)), search_model_id)
+    web = BedrockWebSearch(AsyncOpenAI(provider=bedrock(region=region), timeout=SEARCH_TIMEOUT, max_retries=1),
+                           search_model_id)
     agents = create_agents(web.as_tool())
     claude = Claude(model_id, profile, region)
 
@@ -427,36 +476,39 @@ async def main(research_query: str):
           f"(up to {MAX_REVIEW_ROUNDS} rounds)")
     print(f"5. {agents['publisher'].name}:    report -> Markdown file, using the save_report tool")
     print(f"Date given to agents: {today()} (Japan time)")
-    print(f"web_search: Bedrock web search on {search_model_id}, external_web_access=False\n")
+    print(f"web_search: Bedrock web search on {search_model_id}, external_web_access=False")
+    print(f"Timeouts: web search {SEARCH_TIMEOUT}s (1 retry), model request {MODEL_TIMEOUT}s "
+          f"({MODEL_RETRIES} retries), agent step {STEP_TIMEOUT}s\n")
 
     print("--- Query ---")
     print(f"{research_query}\n")
 
     print(f"Running on {model_id} via Amazon Bedrock...\n")
-    plan = await plan_searches(claude, agents["planner"], research_query)
-    summaries = await run_searches(claude, agents["searcher"], plan)
-    report = await write_report(claude, agents["writer"], research_query, summaries)
-    report = await review_report(claude, agents["fact_checker"], agents["writer"], report, summaries)
-    await publish_report(claude, agents["publisher"], report)
+    try:
+        plan = await plan_searches(claude, agents["planner"], research_query)
+        summaries = await run_searches(claude, agents["searcher"], web, plan)
+        report = await write_report(claude, agents["writer"], research_query, summaries)
+        report = await review_report(claude, agents["fact_checker"], agents["writer"], report, summaries)
+        await publish_report(claude, agents["publisher"], report)
 
-    print("--- Report ---")
-    print(report.markdown_report)
-    print("\n--- Follow-up questions ---")
-    for question in report.follow_up_questions:
-        print(f"* {question}")
+        print("--- Report ---")
+        print(report.markdown_report)
+        print("\n--- Follow-up questions ---")
+        for question in report.follow_up_questions:
+            print(f"* {question}")
 
-    # 3. Two bills: Claude reports its cost per run, and web search is billed to the search model
-    print("\n--- Run Summary ---")
-    print(f"Claude runs:  {len(claude.runs)}")
-    print(f"Claude cost:  ${sum(run.total_cost_usd or 0 for run in claude.runs):.4f}")
-    print(f"Web searches: {web.calls} on {search_model_id}, {web.input_tokens} in / {web.output_tokens} out tokens "
-          "(not in the Claude cost)")
-
-    # 4. Clean up: none of these sessions is ever resumed, so remove their transcripts
-    sessions = {run.session_id for run in claude.runs}
-    for session_id in sessions:
-        delete_session(session_id)
-    print(f"\n--- {len(sessions)} sessions deleted (delete_session) ---")
+        # 3. Two bills: Claude reports its cost per run, and web search is billed to the search model
+        print("\n--- Run Summary ---")
+        print(f"Claude runs:  {len(claude.runs)}")
+        print(f"Claude cost:  ${sum(run.total_cost_usd or 0 for run in claude.runs):.4f}")
+        print(f"Web searches: {web.calls} on {search_model_id}, "
+              f"{web.input_tokens} in / {web.output_tokens} out tokens (not in the Claude cost)")
+    finally:
+        # 4. Clean up, even when a step failed: none of these sessions is ever resumed, so remove
+        #    their transcripts
+        for session_id in claude.sessions:
+            delete_session(session_id)
+        print(f"\n--- {len(claude.sessions)} sessions deleted (delete_session) ---")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Research a question on the web with a multi-agent pipeline.")
@@ -465,4 +517,8 @@ if __name__ == "__main__":
     # Web content contains characters like em dashes that Windows code pages (e.g. cp932) can't encode
     # when output is redirected to a file, so always write UTF-8
     sys.stdout.reconfigure(encoding="utf-8")
-    asyncio.run(main(args.query))
+    try:
+        asyncio.run(main(args.query))
+    except StepTimeout as e:
+        # The planner, writer and publisher have no fallback, so the run stops with a clear reason
+        sys.exit(f"\nStopped: {e}.")

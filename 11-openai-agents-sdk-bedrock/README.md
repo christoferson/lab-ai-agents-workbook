@@ -130,7 +130,7 @@ uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-guardrails.py -
 `openai-agent-deep-research.py` combines the earlier patterns into a research pipeline, with code deciding the order of five agents. Models don't know today's date, so every agent's instructions include it (in Japan time). This is cheaper and more reliable than a "current time" tool, which would cost an extra model round trip and which the agent might forget to call.
 
 1. A Planner (structured output `SearchPlan`) turns the query into 3 searches, each with a reason.
-2. A Searcher runs every search in parallel with `asyncio.gather`, using `WebSearchTool`. `tool_choice="required"` forces a search, so each summary is grounded in current results rather than the model's memory. The `url_citation` sources from each answer are passed along.
+2. A Searcher runs every search in parallel with `asyncio.gather`, using `WebSearchTool`. Its instructions say to always search first, so each summary is grounded in current results rather than the model's memory. The `url_citation` sources from each answer are passed along.
 3. A Writer (structured output `ReportData`) combines the summaries into a Markdown report with a Sources section, a short summary and follow-up questions.
 4. A Fact Checker (structured output `FactCheck`) compares the report against the summaries and can run its own web searches to verify doubtful claims. It flags contradictions, unsupported claims and outdated information. If it finds issues, the Writer revises the report and the Fact Checker checks it again, told which corrections were already made. This review loop runs in code and stops when a check passes or after `MAX_REVIEW_ROUNDS` (3) rounds.
 5. A Publisher saves the report to `reports/` (git-ignored) with a `save_report` tool.
@@ -144,6 +144,15 @@ uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-guardrails.py -
 The script sets `external_web_access=False`, so searches are served from the Bedrock web index and cache and your request data stays inside AWS. Setting it to `True` also needs the `bedrock-websearch:ExternalWebAccess` permission.
 
 The SDK's `WebSearchTool` always sends `filters` and `user_location` fields, even when they're empty, and Bedrock rejects them with a 400 error. The Searcher therefore passes a clean tool definition through `ModelSettings(extra_body={"tools": [...]})`, which replaces the SDK's `tools` list in the request.
+
+The Searcher doesn't set `tool_choice="required"`. In October 2026 tests, every web search request with it timed out after 90 to 300 seconds. Without it, the model still searched each time and cited its sources.
+
+Bedrock web search can hang, and the SDK has no time limit for a whole run, so the script sets two timeouts:
+
+- **Model requests:** the client gets `AsyncOpenAI(timeout=180, max_retries=1)`, instead of the default of 10 minutes and 2 retries. Hosted web search runs inside the model's request, so this limit covers the searches too.
+- **Agent steps:** each `Runner.run` is wrapped in `asyncio.wait_for(..., 600)`. In a test with a 45-second limit, it stopped the Fact Checker on time.
+
+When a step times out, a timed-out search is skipped and a timed-out fact check publishes the report unchecked. If the Planner, Writer or Publisher times out, the run stops with a message. If no web search succeeds at all, the run stops before the Writer, which would otherwise write from memory.
 
 ```bash
 uv run --env-file .env 11-openai-agents-sdk-bedrock/openai-agent-deep-research.py
